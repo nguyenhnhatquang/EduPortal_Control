@@ -1,0 +1,162 @@
+import type { DeployProgressEvent, Settings } from "../../types";
+import { fallbackSettings } from "../settings/defaults";
+import type { DeployStepState, DeployStepView } from "./types";
+
+export function createDeploySteps(settings: Settings = fallbackSettings): DeployStepView[] {
+  return [
+    {
+      id: "validate",
+      label: "Validate package",
+      detail: "Check Portal/build/index.js and WebApi/WebApi.exe.",
+      state: "pending",
+    },
+    {
+      id: "extract",
+      label: "Extract release",
+      detail: `Create a new timestamped folder under ${settings.deployRoot}.`,
+      state: "pending",
+    },
+    {
+      id: "npm",
+      label: "Install Portal dependencies",
+      detail: settings.portalInstallDependencies ? "Run npm install --omit=dev in Portal." : "Disabled in settings.",
+      state: settings.portalInstallDependencies ? "pending" : "skipped",
+    },
+    {
+      id: "asset",
+      label: "Copy Portal assets",
+      detail: settings.portalAssetCopy.enabled
+        ? `Copy ${settings.portalAssetCopy.source} to ${settings.portalAssetCopy.destination}.`
+        : "Disabled in settings.",
+      state: settings.portalAssetCopy.enabled ? "pending" : "skipped",
+    },
+    {
+      id: "config",
+      label: "Generate PM2 config",
+      detail: "Write config.json with Portal/WebApi scripts, logs, and env.",
+      state: "pending",
+    },
+    {
+      id: "pm2",
+      label: "Reload PM2",
+      detail: "Run pm2 startOrReload config.json --update-env.",
+      state: "pending",
+    },
+    {
+      id: "history",
+      label: "Save deployment history",
+      detail: "Mark active deployment and apply retention.",
+      state: "pending",
+    },
+  ];
+}
+
+export function markDeployStep(steps: DeployStepView[], id: string, state: DeployStepState): DeployStepView[] {
+  let seenTarget = false;
+  return steps.map((step) => {
+    if (step.id === id) {
+      seenTarget = true;
+      return { ...step, state };
+    }
+    if (!seenTarget && state === "running" && step.state === "pending") {
+      return { ...step, state: "done" as DeployStepState };
+    }
+    return step;
+  });
+}
+
+export function failActiveDeployStep(steps: DeployStepView[]): DeployStepView[] {
+  const runningIndex = steps.findIndex((step) => step.state === "running");
+  if (runningIndex >= 0) {
+    return steps.map((step, index) => (index === runningIndex ? { ...step, state: "failed" } : step));
+  }
+
+  const firstPendingIndex = steps.findIndex((step) => step.state === "pending");
+  if (firstPendingIndex >= 0) {
+    return steps.map((step, index) => (index === firstPendingIndex ? { ...step, state: "failed" } : step));
+  }
+
+  return steps;
+}
+
+export function applyDeployProgressEvent(steps: DeployStepView[], event: DeployProgressEvent): DeployStepView[] {
+  let seenTarget = false;
+  const nextSteps = steps.map((step) => {
+    if (step.id === event.stepId) {
+      seenTarget = true;
+      return {
+        ...step,
+        label: event.label,
+        detail: event.detail,
+        state: event.state,
+      };
+    }
+
+    if (!seenTarget && event.state === "running" && step.state === "pending") {
+      return { ...step, state: "done" as DeployStepState };
+    }
+
+    return step;
+  });
+
+  return nextSteps.some((step) => step.id === event.stepId)
+    ? nextSteps
+    : [
+        ...nextSteps,
+        {
+          id: event.stepId,
+          label: event.label,
+          detail: event.detail,
+          state: event.state,
+        },
+      ];
+}
+
+export function buildDeployStepsFromResult(
+  settings: Settings,
+  result: {
+    postDeploy: Array<{ name: string; skipped: boolean; success: boolean; message: string }>;
+    pm2: { success: boolean; skipped: boolean; message: string };
+  },
+): DeployStepView[] {
+  const steps = createDeploySteps(settings).map((step) => ({
+    ...step,
+    state: step.state === "skipped" ? ("skipped" as DeployStepState) : ("done" as DeployStepState),
+  }));
+  const npmStep = result.postDeploy.find((step) => step.name === "Portal npm install");
+  const assetStep = result.postDeploy.find((step) => step.name === "Portal asset copy");
+
+  return steps.map((step) => {
+    if (step.id === "npm" && npmStep) {
+      return {
+        ...step,
+        detail: npmStep.message,
+        state: npmStep.skipped ? ("skipped" as DeployStepState) : npmStep.success ? "done" : "failed",
+      };
+    }
+    if (step.id === "asset" && assetStep) {
+      return {
+        ...step,
+        detail: assetStep.message,
+        state: assetStep.skipped ? ("skipped" as DeployStepState) : assetStep.success ? "done" : "failed",
+      };
+    }
+    if (step.id === "pm2") {
+      return {
+        ...step,
+        detail: result.pm2.message,
+        state: result.pm2.skipped ? ("skipped" as DeployStepState) : result.pm2.success ? "done" : "failed",
+      };
+    }
+    return step;
+  });
+}
+
+export function currentDeployStepLabel(steps: DeployStepView[]) {
+  const failed = steps.find((step) => step.state === "failed");
+  if (failed) return `${failed.label} failed`;
+  const running = steps.find((step) => step.state === "running");
+  if (running) return `${running.label} is running`;
+  const completed = steps.filter((step) => step.state === "done" || step.state === "skipped").length;
+  return `${completed}/${steps.length} step(s) completed`;
+}
