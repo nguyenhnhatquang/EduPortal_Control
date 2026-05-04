@@ -5,16 +5,14 @@ import {
   FolderOpen,
   Loader2,
   Network,
-  Play,
   RefreshCw,
   Save,
-  ScrollText,
   ShieldCheck,
-  Square,
   XCircle,
 } from "lucide-react";
 import { Fragment } from "react";
-import { formatBytes, statusClassName } from "../../shared/formatters";
+import { CADDY_PM2_APP } from "../../domain/pm2";
+import { Pm2ProcessCard } from "../components/Pm2ProcessCard";
 import type {
   CaddyCommandResult,
   CaddyFirewallResult,
@@ -225,13 +223,6 @@ function CaddyProcessPanel({
   onAction: (appName: ManagedAppName, action: Pm2Action) => void;
   onOpenLog: (appName: ManagedAppName) => void;
 }) {
-  const status = process?.status ?? "not found";
-  const normalizedStatus = status.toLowerCase();
-  const canControl = pm2Enabled && process !== null;
-  const startBusy = busy === "pm2:Caddy:start";
-  const stopBusy = busy === "pm2:Caddy:stop";
-  const restartBusy = busy === "pm2:Caddy:restart";
-
   return (
     <div className="panel">
       <div className="panel-heading">
@@ -242,59 +233,17 @@ function CaddyProcessPanel({
         <Network size={20} />
       </div>
 
-      <div className="process-card caddy-process-card">
-        <div className="process-title">
-          <div>
-            <strong>Caddy</strong>
-            <span>PM2 id {process?.pmId ?? "-"}</span>
-          </div>
-          <span className={`pill ${statusClassName(normalizedStatus)}`}>{status}</span>
-        </div>
-
-        <dl className="process-metrics">
-          <dt>PID</dt>
-          <dd>{process?.pid ?? "-"}</dd>
-          <dt>CPU</dt>
-          <dd>{process?.cpu == null ? "-" : `${process.cpu.toFixed(1)}%`}</dd>
-          <dt>Memory</dt>
-          <dd>{formatBytes(process?.memory)}</dd>
-          <dt>Restarts</dt>
-          <dd>{process?.restartTime ?? "-"}</dd>
-        </dl>
-
-        <div className="process-path">{process?.scriptPath ?? "caddy.exe is not registered in PM2 yet."}</div>
-
-        <div className="process-actions">
-          <button
-            className="secondary-button compact"
-            disabled={!canControl || normalizedStatus === "online" || startBusy}
-            onClick={() => onAction("Caddy", "start")}
-          >
-            {startBusy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            Start
-          </button>
-          <button
-            className="secondary-button compact"
-            disabled={!canControl || normalizedStatus !== "online" || stopBusy}
-            onClick={() => onAction("Caddy", "stop")}
-          >
-            {stopBusy ? <Loader2 className="spin" size={16} /> : <Square size={16} />}
-            Stop
-          </button>
-          <button
-            className="secondary-button compact"
-            disabled={!canControl || restartBusy}
-            onClick={() => onAction("Caddy", "restart")}
-          >
-            {restartBusy ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-            Restart
-          </button>
-          <button className="secondary-button compact" onClick={() => onOpenLog("Caddy")}>
-            <ScrollText size={16} />
-            Log
-          </button>
-        </div>
-      </div>
+      <Pm2ProcessCard
+        appName={CADDY_PM2_APP}
+        process={process}
+        busy={busy}
+        pm2Enabled={pm2Enabled}
+        missingPathLabel="caddy.exe is not registered in PM2 yet."
+        pathField="scriptPath"
+        className="caddy-process-card"
+        onAction={onAction}
+        onOpenLog={onOpenLog}
+      />
     </div>
   );
 }

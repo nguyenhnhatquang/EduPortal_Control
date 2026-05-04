@@ -1,11 +1,11 @@
 use crate::{
     apply_caddy_config_blocking, apply_caddy_publish_test_config_blocking,
-    configure_caddy_firewall_blocking, control_pm2_app_blocking, deploy_package_blocking,
-    get_caddy_status_blocking, get_system_status_blocking, install_bundled_caddy_blocking,
-    install_caddy_zip_blocking, install_software_package_blocking, list_database_backups_blocking,
-    list_deployments_blocking, list_pm2_processes_blocking, list_software_packages_blocking,
-    read_log_blocking, restore_database_backup_blocking, rollback_deployment_blocking,
-    run_database_backup_blocking, run_migration_blocking, validate_package_blocking,
+    configure_caddy_firewall_blocking, deploy_package_blocking, get_caddy_status_blocking,
+    get_system_status_blocking, install_bundled_caddy_blocking, install_caddy_zip_blocking,
+    install_software_package_blocking, list_database_backups_blocking, list_deployments_blocking,
+    list_software_packages_blocking, read_log_blocking, restore_database_backup_blocking,
+    rollback_deployment_blocking, run_database_backup_blocking, run_migration_blocking,
+    validate_package_blocking,
 };
 use crate::{
     domain::{
@@ -15,6 +15,7 @@ use crate::{
         SoftwareInstallResult, SoftwarePackageStatus, SystemStatus,
     },
     runtime::run_blocking,
+    services::pm2::{control_pm2_app_blocking, list_pm2_processes_blocking},
     storage,
 };
 use tauri::AppHandle;

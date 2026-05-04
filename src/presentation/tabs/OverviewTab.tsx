@@ -3,17 +3,22 @@ import {
   CheckCircle2,
   CircleOff,
   HardDrive,
-  Loader2,
-  Play,
-  RefreshCw,
-  ScrollText,
   Server,
-  Square,
   Terminal,
 } from "lucide-react";
+import { DEPLOY_PM2_APPS, findPm2Process } from "../../domain/pm2";
+import { Pm2ProcessCard } from "../components/Pm2ProcessCard";
 import { EnvPreview } from "../components/EnvPreview";
-import { formatBytes, formatDate, statusClassName } from "../../shared/formatters";
-import type { DeploymentRecord, DeploymentState, Pm2Action, Pm2Process, Settings, SystemStatus } from "../../types";
+import { formatDate } from "../../shared/formatters";
+import type {
+  DeploymentRecord,
+  DeploymentState,
+  ManagedAppName,
+  Pm2Action,
+  Pm2Process,
+  Settings,
+  SystemStatus,
+} from "../../types";
 
 interface OverviewTabProps {
   status: SystemStatus | null;
@@ -22,8 +27,8 @@ interface OverviewTabProps {
   settings: Settings;
   pm2Processes: Pm2Process[];
   busy: string | null;
-  onPm2Action: (appName: "Portal" | "WebApi", action: Pm2Action) => void;
-  onOpenLog: (appName: "Portal" | "WebApi") => void;
+  onPm2Action: (appName: ManagedAppName, action: Pm2Action) => void;
+  onOpenLog: (appName: ManagedAppName) => void;
 }
 
 export function OverviewTab({
@@ -121,12 +126,9 @@ function Pm2ProcessPanel({
   processes: Pm2Process[];
   busy: string | null;
   pm2Enabled: boolean;
-  onAction: (appName: "Portal" | "WebApi", action: Pm2Action) => void;
-  onOpenLog: (appName: "Portal" | "WebApi") => void;
+  onAction: (appName: ManagedAppName, action: Pm2Action) => void;
+  onOpenLog: (appName: ManagedAppName) => void;
 }) {
-  const processByName = new Map(processes.map((process) => [process.name, process]));
-  const managedApps: Array<"Portal" | "WebApi"> = ["Portal", "WebApi"];
-
   return (
     <div className="panel span-2">
       <div className="panel-heading">
@@ -138,71 +140,18 @@ function Pm2ProcessPanel({
       </div>
 
       <div className="process-grid">
-        {managedApps.map((appName) => {
-          const process = processByName.get(appName) ?? null;
-          const status = process?.status ?? "not found";
-          const normalizedStatus = status.toLowerCase();
-          const canControl = pm2Enabled && process !== null;
-          const startBusy = busy === `pm2:${appName}:start`;
-          const stopBusy = busy === `pm2:${appName}:stop`;
-          const restartBusy = busy === `pm2:${appName}:restart`;
-
-          return (
-            <div className="process-card" key={appName}>
-              <div className="process-title">
-                <div>
-                  <strong>{appName}</strong>
-                  <span>PM2 id {process?.pmId ?? "-"}</span>
-                </div>
-                <span className={`pill ${statusClassName(normalizedStatus)}`}>{status}</span>
-              </div>
-
-              <dl className="process-metrics">
-                <dt>PID</dt>
-                <dd>{process?.pid ?? "-"}</dd>
-                <dt>CPU</dt>
-                <dd>{process?.cpu == null ? "-" : `${process.cpu.toFixed(1)}%`}</dd>
-                <dt>Memory</dt>
-                <dd>{formatBytes(process?.memory)}</dd>
-                <dt>Restarts</dt>
-                <dd>{process?.restartTime ?? "-"}</dd>
-              </dl>
-
-              <div className="process-path">{process?.cwd ?? "Deploy first to register this app in PM2."}</div>
-
-              <div className="process-actions">
-                <button
-                  className="secondary-button compact"
-                  disabled={!canControl || normalizedStatus === "online" || startBusy}
-                  onClick={() => onAction(appName, "start")}
-                >
-                  {startBusy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                  Start
-                </button>
-                <button
-                  className="secondary-button compact"
-                  disabled={!canControl || normalizedStatus !== "online" || stopBusy}
-                  onClick={() => onAction(appName, "stop")}
-                >
-                  {stopBusy ? <Loader2 className="spin" size={16} /> : <Square size={16} />}
-                  Stop
-                </button>
-                <button
-                  className="secondary-button compact"
-                  disabled={!canControl || restartBusy}
-                  onClick={() => onAction(appName, "restart")}
-                >
-                  {restartBusy ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-                  Restart
-                </button>
-                <button className="secondary-button compact" onClick={() => onOpenLog(appName)}>
-                  <ScrollText size={16} />
-                  Log
-                </button>
-              </div>
-            </div>
-          );
-        })}
+        {DEPLOY_PM2_APPS.map((appName) => (
+          <Pm2ProcessCard
+            key={appName}
+            appName={appName}
+            process={findPm2Process(processes, appName)}
+            busy={busy}
+            pm2Enabled={pm2Enabled}
+            missingPathLabel="Deploy first to register this app in PM2."
+            onAction={onAction}
+            onOpenLog={onOpenLog}
+          />
+        ))}
       </div>
     </div>
   );

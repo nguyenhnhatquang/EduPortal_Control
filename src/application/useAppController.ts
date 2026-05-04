@@ -39,6 +39,7 @@ import {
   failActiveDeployStep,
   markDeployStep,
 } from "../domain/deploy/deploy-steps";
+import { CADDY_PM2_APP, findPm2Process, pm2BusyKey } from "../domain/pm2";
 import type { DeployStepView } from "../domain/deploy/types";
 import { fallbackSettings } from "../domain/settings/defaults";
 import { errorMessage } from "../shared/errors";
@@ -115,7 +116,7 @@ export function useAppController() {
   }, [deployments]);
 
   const caddyProcess = useMemo(
-    () => pm2Processes.find((process) => process.name === "Caddy") ?? null,
+    () => findPm2Process(pm2Processes, CADDY_PM2_APP),
     [pm2Processes],
   );
 
@@ -394,7 +395,7 @@ export function useAppController() {
 
   const handlePm2Action = useCallback(
     async (appName: ManagedAppName, action: Pm2Action) => {
-      setBusy(`pm2:${appName}:${action}`);
+      setBusy(pm2BusyKey(appName, action));
       setError(null);
       setNotice(null);
       try {

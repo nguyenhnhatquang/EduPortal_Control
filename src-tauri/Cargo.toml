@@ -1,6 +1,6 @@
 [package]
 name = "eduportal_control"
-version = "0.2.3"
+version = "0.2.4"
 description = "EduPortal_Control VPS Manager"
 authors = ["EduPortal_Control"]
 edition = "2021"

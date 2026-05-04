@@ -219,14 +219,13 @@ pub(crate) fn run_pm2_config(config_path: &Path) -> Pm2CommandResult {
 pub(crate) fn run_pm2_config_with_recovery(
     config_path: &Path,
     deployment_path: &str,
-    list_pm2_processes_blocking: fn() -> Result<Vec<Pm2Process>, String>,
 ) -> Pm2CommandResult {
     let result = run_pm2_config(config_path);
     if !result.attempted || result.skipped || !result.success {
         return result;
     }
 
-    match verify_pm2_deployment_path(deployment_path, list_pm2_processes_blocking) {
+    match verify_pm2_deployment_path(deployment_path) {
         Ok(()) => result,
         Err(first_mismatch) => {
             let delete_result = run_pm2_delete_managed_apps();
@@ -254,7 +253,7 @@ pub(crate) fn run_pm2_config_with_recovery(
                 return combined;
             }
 
-            match verify_pm2_deployment_path(deployment_path, list_pm2_processes_blocking) {
+            match verify_pm2_deployment_path(deployment_path) {
                 Ok(()) => Pm2CommandResult {
                     success: true,
                     message: "PM2 apps were recreated with the active deployment config.".to_string(),
@@ -272,10 +271,7 @@ pub(crate) fn run_pm2_config_with_recovery(
     }
 }
 
-fn verify_pm2_deployment_path(
-    deployment_path: &str,
-    list_pm2_processes_blocking: fn() -> Result<Vec<Pm2Process>, String>,
-) -> Result<(), String> {
+fn verify_pm2_deployment_path(deployment_path: &str) -> Result<(), String> {
     if !pm2_execution_enabled() {
         return Ok(());
     }
@@ -320,6 +316,28 @@ fn verify_pm2_deployment_path(
     }
 
     Ok(())
+}
+
+pub(crate) fn list_pm2_processes_blocking() -> Result<Vec<Pm2Process>, String> {
+    if !pm2_execution_enabled() {
+        return Ok(Vec::new());
+    }
+
+    let output = hidden_command(pm2_command())
+        .arg("jlist")
+        .output()
+        .map_err(|err| format!("Failed to execute PM2 process list: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("PM2 jlist exited with status {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    parse_pm2_processes(&String::from_utf8_lossy(&output.stdout))
 }
 
 pub(crate) fn pm2_paths_match(actual: &str, expected: &str) -> bool {
@@ -460,6 +478,15 @@ pub(crate) fn run_pm2_app_action(action: &str, app_name: &str) -> Pm2CommandResu
             message: format!("Failed to execute PM2 {action}: {err}"),
         },
     }
+}
+
+pub(crate) fn control_pm2_app_blocking(
+    app_name: String,
+    action: String,
+) -> Result<Pm2CommandResult, String> {
+    let app_name = validate_pm2_app_name(&app_name)?;
+    let action = validate_pm2_action(&action)?;
+    Ok(run_pm2_app_action(action, app_name))
 }
 
 fn join_command_output(existing: &str, next: &str) -> String {

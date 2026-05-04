@@ -284,11 +284,7 @@ pub(crate) fn deploy_package_blocking(
         "running",
         "Running pm2 startOrReload.",
     );
-    let pm2 = services::pm2::run_pm2_config_with_recovery(
-        &config_path,
-        &deployment_path,
-        list_pm2_processes_blocking,
-    );
+    let pm2 = services::pm2::run_pm2_config_with_recovery(&config_path, &deployment_path);
     if pm2.attempted && !pm2.success {
         emit_deploy_progress(&app, "pm2", "Reload PM2", "failed", &pm2.message);
         return Err(format!("PM2 reload failed: {}", pm2.message));
@@ -368,7 +364,6 @@ pub(crate) fn rollback_deployment_blocking(
     let pm2 = services::pm2::run_pm2_config_with_recovery(
         Path::new(&deployment.config_path),
         &deployment.deployment_path,
-        list_pm2_processes_blocking,
     );
     if pm2.attempted && !pm2.success {
         return Err(format!("PM2 rollback failed: {}", pm2.message));
@@ -414,37 +409,6 @@ pub(crate) fn read_log_blocking(
         path: display_path(&log_path),
         lines: all_lines[start..].to_vec(),
     })
-}
-
-pub(crate) fn list_pm2_processes_blocking() -> Result<Vec<Pm2Process>, String> {
-    if !pm2_execution_enabled() {
-        return Ok(Vec::new());
-    }
-
-    let output = hidden_command(pm2_command())
-        .arg("jlist")
-        .output()
-        .map_err(|err| format!("Failed to execute PM2 process list: {err}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("PM2 jlist exited with status {}", output.status)
-        } else {
-            stderr
-        });
-    }
-
-    services::pm2::parse_pm2_processes(&String::from_utf8_lossy(&output.stdout))
-}
-
-pub(crate) fn control_pm2_app_blocking(
-    app_name: String,
-    action: String,
-) -> Result<Pm2CommandResult, String> {
-    let app_name = services::pm2::validate_pm2_app_name(&app_name)?;
-    let action = services::pm2::validate_pm2_action(&action)?;
-    Ok(services::pm2::run_pm2_app_action(action, app_name))
 }
 
 pub(crate) fn validate_package_path(zip_path: &Path) -> Result<PackageValidation, String> {
