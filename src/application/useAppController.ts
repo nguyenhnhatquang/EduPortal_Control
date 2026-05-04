@@ -38,6 +38,7 @@ import {
   applyDeployProgressEvent,
   buildDeployStepsFromResult,
   createDeploySteps,
+  createPortalReleaseDeploySteps,
   failActiveDeployStep,
   markDeployStep,
 } from "../domain/deploy/deploy-steps";
@@ -350,7 +351,7 @@ export function useAppController() {
     );
     if (!confirmed) return;
 
-    const runningSteps = createDeploySteps(settings);
+    const runningSteps = createPortalReleaseDeploySteps(settings);
     setDeploySteps(runningSteps);
     setBusy("portal-release-deploy");
     setError(null);
@@ -362,7 +363,7 @@ export function useAppController() {
         .map((step) => step.message)
         .join(" ");
       setNotice([result.deployment.releaseTag ? `Portal ${result.deployment.releaseTag} deployed.` : "", postDeploySummary, result.pm2.message].filter(Boolean).join(" "));
-      setDeploySteps(buildDeployStepsFromResult(settings, result));
+      setDeploySteps(buildDeployStepsFromResult(settings, result, { portalRelease: true }));
       setValidation(null);
       if (result.deployment.releaseTag) {
         setPortalReleaseCheck((current) =>

@@ -244,12 +244,63 @@ pub(crate) fn deploy_portal_release_blocking(
         release_asset_name: Some(download.release.asset_name.clone()),
         release_digest: download.release.asset_digest.clone(),
     };
-    deploy_package_with_metadata(
-        app,
+    let zip_path = download.zip_path.clone();
+    let deploy_result = deploy_package_with_metadata(
+        app.clone(),
         services::portal_release::display_download_path(&download),
         settings,
         metadata,
-    )
+    );
+    let cleanup_result = cleanup_portal_release_zip(&app, &zip_path);
+
+    match (deploy_result, cleanup_result) {
+        (Ok(result), Ok(())) => Ok(result),
+        (Err(deploy_err), Ok(())) => Err(deploy_err),
+        (Ok(_), Err(cleanup_err)) => Err(format!(
+            "Portal release deployed, but cached release zip cleanup failed: {cleanup_err}"
+        )),
+        (Err(deploy_err), Err(cleanup_err)) => Err(format!(
+            "{deploy_err} Cached release zip cleanup also failed: {cleanup_err}"
+        )),
+    }
+}
+
+fn cleanup_portal_release_zip(app: &AppHandle, zip_path: &Path) -> Result<(), String> {
+    emit_deploy_progress(
+        app,
+        "cleanup",
+        "Clean release zip",
+        "running",
+        "Deleting downloaded GitHub release zip.",
+    );
+
+    let result = if zip_path.exists() {
+        fs::remove_file(zip_path).map_err(|err| {
+            format!(
+                "Failed to delete cached Portal release zip {}: {err}",
+                zip_path.display()
+            )
+        })
+    } else {
+        Ok(())
+    };
+
+    match result {
+        Ok(()) => {
+            emit_deploy_progress(
+                app,
+                "cleanup",
+                "Clean release zip",
+                "done",
+                "Downloaded release zip deleted.",
+            );
+            Ok(())
+        }
+        Err(err) => {
+            emit_deploy_progress(app, "cleanup", "Clean release zip", "failed", &err);
+            Err(err)
+        }
+    }
 }
 
 fn deploy_package_with_metadata(

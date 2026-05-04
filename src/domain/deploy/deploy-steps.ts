@@ -51,6 +51,24 @@ export function createDeploySteps(settings: Settings = fallbackSettings): Deploy
   ];
 }
 
+export function createPortalReleaseDeploySteps(settings: Settings = fallbackSettings): DeployStepView[] {
+  return [
+    {
+      id: "download",
+      label: "Download Portal release",
+      detail: "Download the selected GitHub release asset.",
+      state: "pending",
+    },
+    ...createDeploySteps(settings),
+    {
+      id: "cleanup",
+      label: "Clean release zip",
+      detail: "Delete the downloaded GitHub release zip from local cache.",
+      state: "pending",
+    },
+  ];
+}
+
 export function markDeployStep(steps: DeployStepView[], id: string, state: DeployStepState): DeployStepView[] {
   let seenTarget = false;
   return steps.map((step) => {
@@ -122,8 +140,9 @@ export function buildDeployStepsFromResult(
     postDeploy: Array<{ name: string; skipped: boolean; success: boolean; message: string }>;
     pm2: { success: boolean; skipped: boolean; message: string };
   },
+  options: { portalRelease?: boolean } = {},
 ): DeployStepView[] {
-  const steps = createDeploySteps(settings).map((step) => ({
+  const steps = (options.portalRelease ? createPortalReleaseDeploySteps(settings) : createDeploySteps(settings)).map((step) => ({
     ...step,
     state: step.state === "skipped" ? ("skipped" as DeployStepState) : ("done" as DeployStepState),
   }));
