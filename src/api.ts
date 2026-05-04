@@ -404,6 +404,35 @@ export async function applyCaddyConfig(settings: Settings) {
   return invoke<CaddyCommandResult>("apply_caddy_config", { settings });
 }
 
+export async function applyCaddyPublishTestConfig(settings: Settings) {
+  if (!isTauriRuntime()) {
+    const status = {
+      installed: true,
+      version: "preview",
+      error: null,
+      executablePath: `${settings.deployRoot}\\${settings.caddy.installDir}\\caddy.exe`,
+      installDir: `${settings.deployRoot}\\${settings.caddy.installDir}`,
+      configPath: `${settings.deployRoot}\\${settings.caddy.configPath}`,
+      configExists: true,
+    } satisfies CaddyStatus;
+    return {
+      attempted: true,
+      skipped: !settings.caddy.enabled,
+      success: true,
+      command: "caddy publish test preview",
+      path: status.configPath,
+      stdout: "",
+      stderr: "",
+      message: settings.caddy.enabled
+        ? "Publish test page preview is active through PM2."
+        : "Publish test Caddyfile preview validated. PM2 Caddy is disabled.",
+      status,
+      pm2: null,
+    } satisfies CaddyCommandResult;
+  }
+  return invoke<CaddyCommandResult>("apply_caddy_publish_test_config", { settings });
+}
+
 export async function validatePackage(zipPath: string) {
   if (!isTauriRuntime()) {
     return {

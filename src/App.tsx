@@ -114,6 +114,7 @@ function App() {
             onInstall={controller.handleInstallCaddyZip}
             onInstallBundled={controller.handleInstallBundledCaddy}
             onApply={controller.handleApplyCaddyConfig}
+            onApplyPublishTest={controller.handleApplyCaddyPublishTestConfig}
             onPm2Action={controller.handlePm2Action}
             onOpenLog={controller.handleOpenLog}
             onRefresh={controller.refreshCaddyStatus}

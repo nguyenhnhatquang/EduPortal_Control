@@ -3,12 +3,13 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use crate::{
     domain::{DeploymentState, Pm2CommandResult, Pm2Process, Settings, CADDY_APP_NAME},
-    runtime::{display_path, join_display_path, pm2_command, pm2_execution_enabled},
+    runtime::{
+        display_path, hidden_command, join_display_path, pm2_command, pm2_execution_enabled,
+    },
 };
 
 #[derive(Debug, Serialize)]
@@ -73,6 +74,7 @@ pub(crate) fn build_caddy_pm2_config(
     install_dir: &str,
 ) -> Pm2Config {
     let log_file = join_display_path(&settings.deploy_root, &["pm2", "logs", "Caddy.log"]);
+    let error_file = join_display_path(&settings.deploy_root, &["pm2", "logs", "Caddy-error.log"]);
 
     Pm2Config {
         apps: vec![Pm2App {
@@ -88,7 +90,7 @@ pub(crate) fn build_caddy_pm2_config(
             interpreter: Some("none".to_string()),
             cwd: install_dir.to_string(),
             log_file: log_file.clone(),
-            error_file: log_file,
+            error_file,
             log_date_format: "YYYY-MM-DD HH:mm:ss".to_string(),
             merge_logs: true,
             env: BTreeMap::new(),
@@ -143,7 +145,7 @@ pub(crate) fn run_pm2_config(config_path: &Path) -> Pm2CommandResult {
         };
     }
 
-    match Command::new(pm2_command())
+    match hidden_command(pm2_command())
         .arg("startOrReload")
         .arg(config_path)
         .arg("--update-env")
@@ -163,7 +165,7 @@ pub(crate) fn run_pm2_config(config_path: &Path) -> Pm2CommandResult {
 
             if success {
                 command_label.push_str(&format!(" && {} save", pm2_command()));
-                match Command::new(pm2_command()).arg("save").output() {
+                match hidden_command(pm2_command()).arg("save").output() {
                     Ok(save_output) => {
                         let save_stdout = String::from_utf8_lossy(&save_output.stdout)
                             .trim()
@@ -347,7 +349,7 @@ fn run_pm2_delete_managed_apps() -> Pm2CommandResult {
         };
     }
 
-    match Command::new(pm2_command())
+    match hidden_command(pm2_command())
         .arg("delete")
         .arg("Portal")
         .arg("WebApi")
@@ -421,7 +423,7 @@ pub(crate) fn run_pm2_app_action(action: &str, app_name: &str) -> Pm2CommandResu
         };
     }
 
-    match Command::new(pm2_command())
+    match hidden_command(pm2_command())
         .arg(action)
         .arg(app_name)
         .output()

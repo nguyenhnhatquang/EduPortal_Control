@@ -102,6 +102,13 @@ pub(crate) fn apply_caddy_config_blocking(
     services::caddy::apply_caddy_config(&settings)
 }
 
+pub(crate) fn apply_caddy_publish_test_config_blocking(
+    settings: Settings,
+) -> Result<CaddyCommandResult, String> {
+    let settings = sanitize_settings(settings);
+    services::caddy::apply_caddy_publish_test_config(&settings)
+}
+
 fn bundled_caddy_zip_path(app: &AppHandle) -> Result<PathBuf, String> {
     let resource_path = app
         .path()
@@ -410,7 +417,7 @@ pub(crate) fn list_pm2_processes_blocking() -> Result<Vec<Pm2Process>, String> {
         return Ok(Vec::new());
     }
 
-    let output = Command::new(pm2_command())
+    let output = hidden_command(pm2_command())
         .arg("jlist")
         .output()
         .map_err(|err| format!("Failed to execute PM2 process list: {err}"))?;
@@ -631,7 +638,7 @@ fn run_portal_dependency_install(
         ));
     }
 
-    match Command::new(npm_command())
+    match hidden_command(npm_command())
         .arg("install")
         .arg("--omit=dev")
         .current_dir(portal_dir)
@@ -805,7 +812,7 @@ fn run_postgres_backup(settings: &Settings) -> Result<DatabaseCommandResult, Str
     ];
     let command_label = command_label(&command_path, &args);
 
-    let mut command = Command::new(&command_path);
+    let mut command = hidden_command(&command_path);
     command.args(&args);
     apply_postgres_env(&mut command, database);
 
@@ -913,7 +920,7 @@ fn restore_postgres_backup(
     };
     let command_label = command_label(&command_path, &args);
 
-    let mut command = Command::new(&command_path);
+    let mut command = hidden_command(&command_path);
     command.args(&args);
     apply_postgres_env(&mut command, database);
 
@@ -1007,7 +1014,7 @@ pub(crate) fn configure_postgres_backup_schedule(
     args.extend(["/ST".to_string(), schedule.time.clone(), "/F".to_string()]);
 
     let command_label = command_label("schtasks.exe", &args);
-    match Command::new("schtasks.exe").args(&args).output() {
+    match hidden_command("schtasks.exe").args(&args).output() {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1058,7 +1065,7 @@ fn unregister_postgres_backup_schedule() -> Result<DatabaseCommandResult, String
     ];
     let command_label = command_label("schtasks.exe", &args);
 
-    match Command::new("schtasks.exe").args(&args).output() {
+    match hidden_command("schtasks.exe").args(&args).output() {
         Ok(output) => {
             let mut stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1336,6 +1343,7 @@ pub fn run() {
             commands::install_caddy_zip,
             commands::install_bundled_caddy,
             commands::apply_caddy_config,
+            commands::apply_caddy_publish_test_config,
             commands::list_software_packages,
             commands::install_software_package,
             commands::list_pm2_processes,
@@ -1451,6 +1459,23 @@ mod tests {
         assert_eq!(portal.error_file, "C:\\deploy\\pm2\\logs\\Portal.log");
         assert_ne!(portal.error_file, "NUL");
         assert_eq!(portal.env.get("BODY_SIZE_LIMIT"), Some(&"10M".to_string()));
+    }
+
+    #[test]
+    fn caddy_pm2_config_uses_separate_error_log() {
+        let mut settings = default_settings();
+        settings.deploy_root = "C:\\deploy".to_string();
+        let config = services::pm2::build_caddy_pm2_config(
+            &settings,
+            "C:\\deploy\\caddy\\caddy.exe",
+            "C:\\deploy\\caddy\\Caddyfile",
+            "C:\\deploy\\caddy",
+        );
+        let caddy = &config.apps[0];
+
+        assert_eq!(caddy.log_file, "C:\\deploy\\pm2\\logs\\Caddy.log");
+        assert_eq!(caddy.error_file, "C:\\deploy\\pm2\\logs\\Caddy-error.log");
+        assert_ne!(caddy.log_file, caddy.error_file);
     }
 
     #[test]

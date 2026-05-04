@@ -2,14 +2,13 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use zip::ZipArchive;
 
 use crate::{
     domain::{CaddyCommandResult, CaddyStatus, Settings},
-    runtime::{command_version, display_path, looks_windows_path},
+    runtime::{command_version, display_path, hidden_command, looks_windows_path},
     services::pm2,
     storage::write_json,
 };
@@ -144,6 +143,38 @@ pub(crate) fn install_caddy_zip(
 }
 
 pub(crate) fn apply_caddy_config(settings: &Settings) -> Result<CaddyCommandResult, String> {
+    apply_caddy_config_content(
+        settings,
+        &settings.caddy.config,
+        "Caddyfile written and validated. PM2 Caddy is disabled.",
+        "Caddyfile validated. PM2 reload skipped outside Windows.",
+        "Caddyfile validated and Caddy reloaded through PM2.",
+        "Caddyfile validated, but PM2 reload failed",
+    )
+}
+
+pub(crate) fn apply_caddy_publish_test_config(
+    settings: &Settings,
+) -> Result<CaddyCommandResult, String> {
+    let config = publish_test_caddy_config();
+    apply_caddy_config_content(
+        settings,
+        &config,
+        "Publish test Caddyfile written and validated. PM2 Caddy is disabled.",
+        "Publish test Caddyfile validated. PM2 reload skipped outside Windows.",
+        "Publish test page is active through PM2.",
+        "Publish test Caddyfile validated, but PM2 reload failed",
+    )
+}
+
+fn apply_caddy_config_content(
+    settings: &Settings,
+    config: &str,
+    pm2_disabled_message: &str,
+    pm2_skipped_message: &str,
+    pm2_success_message: &str,
+    pm2_failure_prefix: &str,
+) -> Result<CaddyCommandResult, String> {
     let install_dir = resolve_caddy_install_dir(settings);
     let executable_path = install_dir.join(caddy_executable_name());
     let config_path = resolve_caddy_config_path(settings);
@@ -179,23 +210,51 @@ pub(crate) fn apply_caddy_config(settings: &Settings) -> Result<CaddyCommandResu
             )
         })?;
     }
-    fs::write(&config_path, &settings.caddy.config)
+    fs::write(&config_path, config)
         .map_err(|err| format!("Failed to write Caddyfile {}: {err}", config_path.display()))?;
 
+    let format_args = vec![
+        "fmt".to_string(),
+        "--overwrite".to_string(),
+        display_path(&config_path),
+    ];
+    let formatting = run_command(&executable_path, &format_args);
+    if !formatting.success {
+        return Ok(CaddyCommandResult {
+            attempted: true,
+            skipped: false,
+            success: false,
+            command: formatting.command,
+            path: Some(display_path(&config_path)),
+            stdout: formatting.stdout,
+            stderr: formatting.stderr.clone(),
+            message: if formatting.stderr.is_empty() {
+                "Caddyfile formatting failed.".to_string()
+            } else {
+                formatting.stderr
+            },
+            status: caddy_status(settings),
+            pm2: None,
+        });
+    }
+
     let validation = run_command(&executable_path, &validate_args);
+    let caddy_command = join_command_output(&formatting.command, &validation.command);
+    let caddy_stdout = join_command_output(&formatting.stdout, &validation.stdout);
+    let caddy_stderr = join_command_output(&formatting.stderr, &validation.stderr);
     if !validation.success {
         return Ok(CaddyCommandResult {
             attempted: true,
             skipped: false,
             success: false,
-            command: validation.command,
+            command: caddy_command,
             path: Some(display_path(&config_path)),
-            stdout: validation.stdout,
-            stderr: validation.stderr.clone(),
+            stdout: caddy_stdout,
+            stderr: caddy_stderr,
             message: if validation.stderr.is_empty() {
                 "Caddyfile validation failed.".to_string()
             } else {
-                validation.stderr
+                validation.stderr.clone()
             },
             status: caddy_status(settings),
             pm2: None,
@@ -207,11 +266,11 @@ pub(crate) fn apply_caddy_config(settings: &Settings) -> Result<CaddyCommandResu
             attempted: true,
             skipped: true,
             success: true,
-            command: validation.command,
+            command: caddy_command,
             path: Some(display_path(&config_path)),
-            stdout: validation.stdout,
-            stderr: validation.stderr,
-            message: "Caddyfile written and validated. PM2 Caddy is disabled.".to_string(),
+            stdout: caddy_stdout,
+            stderr: caddy_stderr,
+            message: pm2_disabled_message.to_string(),
             status: caddy_status(settings),
             pm2: None,
         });
@@ -240,29 +299,36 @@ pub(crate) fn apply_caddy_config(settings: &Settings) -> Result<CaddyCommandResu
     let success = pm2_result.success;
     let message = if success {
         if pm2_result.skipped {
-            "Caddyfile validated. PM2 reload skipped outside Windows.".to_string()
+            pm2_skipped_message.to_string()
         } else {
-            "Caddyfile validated and Caddy reloaded through PM2.".to_string()
+            pm2_success_message.to_string()
         }
     } else {
-        format!(
-            "Caddyfile validated, but PM2 reload failed: {}",
-            pm2_result.message
-        )
+        format!("{pm2_failure_prefix}: {}", pm2_result.message)
     };
 
     Ok(CaddyCommandResult {
         attempted: true,
         skipped: pm2_result.skipped,
         success,
-        command: join_command_output(&validation.command, &pm2_result.command),
+        command: join_command_output(&caddy_command, &pm2_result.command),
         path: Some(display_path(&config_path)),
-        stdout: join_command_output(&validation.stdout, &pm2_result.stdout),
-        stderr: join_command_output(&validation.stderr, &pm2_result.stderr),
+        stdout: join_command_output(&caddy_stdout, &pm2_result.stdout),
+        stderr: join_command_output(&caddy_stderr, &pm2_result.stderr),
         message,
         status: caddy_status(settings),
         pm2: Some(pm2_result),
     })
+}
+
+fn publish_test_caddy_config() -> String {
+    r#":80 {
+    encode gzip
+    header Content-Type "text/plain; charset=utf-8"
+    respond "EduClassControl publish test: this VPS is reachable on HTTP port 80." 200
+}
+"#
+    .to_string()
 }
 
 pub(crate) fn resolve_caddy_install_dir(settings: &Settings) -> PathBuf {
@@ -295,7 +361,7 @@ struct CommandRunResult {
 
 fn run_command(command: &Path, args: &[String]) -> CommandRunResult {
     let command_text = command_label(command, args);
-    match Command::new(command).args(args).output() {
+    match hidden_command(command).args(args).output() {
         Ok(output) => CommandRunResult {
             success: output.status.success(),
             command: command_text,

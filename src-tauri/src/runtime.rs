@@ -1,4 +1,7 @@
-use std::{path::Path, process::Command};
+use std::{ffi::OsStr, path::Path, process::Command};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 pub(crate) struct CommandVersion {
     pub ok: Option<String>,
@@ -6,7 +9,7 @@ pub(crate) struct CommandVersion {
 }
 
 pub(crate) fn command_version(command: &str, args: &[&str]) -> CommandVersion {
-    match Command::new(command).args(args).output() {
+    match hidden_command(command).args(args).output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             CommandVersion {
@@ -29,6 +32,20 @@ pub(crate) fn command_version(command: &str, args: &[&str]) -> CommandVersion {
             ok: None,
             err: Some(err.to_string()),
         },
+    }
+}
+
+pub(crate) fn hidden_command<S: AsRef<OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    hide_command_window(&mut command);
+    command
+}
+
+pub(crate) fn hide_command_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 

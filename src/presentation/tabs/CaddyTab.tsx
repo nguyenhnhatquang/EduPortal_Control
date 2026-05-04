@@ -37,6 +37,7 @@ interface CaddyTabProps {
   onInstall: () => void;
   onInstallBundled: () => void;
   onApply: () => void;
+  onApplyPublishTest: () => void;
   onPm2Action: (appName: ManagedAppName, action: Pm2Action) => void;
   onOpenLog: (appName: ManagedAppName) => void;
   onRefresh: () => void;
@@ -57,6 +58,7 @@ export function CaddyTab({
   onInstall,
   onInstallBundled,
   onApply,
+  onApplyPublishTest,
   onPm2Action,
   onOpenLog,
   onRefresh,
@@ -173,7 +175,11 @@ export function CaddyTab({
         <div className="button-row">
           <button className="primary-button" onClick={onApply} disabled={busy === "caddy-apply"}>
             {busy === "caddy-apply" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
-            Apply
+            Use Main Caddyfile
+          </button>
+          <button className="secondary-button" onClick={onApplyPublishTest} disabled={busy === "caddy-publish-test"}>
+            {busy === "caddy-publish-test" ? <Loader2 className="spin" size={17} /> : <Network size={17} />}
+            Test Publish
           </button>
         </div>
       </div>

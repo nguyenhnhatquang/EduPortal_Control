@@ -1,11 +1,12 @@
 use crate::{
     domain::{SoftwareInstallResult, SoftwarePackageStatus},
-    runtime::{command_version, display_path, node_command, npm_command, pm2_command},
+    runtime::{
+        command_version, display_path, hidden_command, node_command, npm_command, pm2_command,
+    },
 };
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 pub(crate) const SOFTWARE_NODEJS: &str = "nodejs";
@@ -502,7 +503,7 @@ fn discover_postgresql_path_entries() -> Vec<PathBuf> {
 
 fn command_parent_dirs(command: &str) -> Vec<PathBuf> {
     let resolver = if cfg!(windows) { "where.exe" } else { "which" };
-    let Ok(output) = Command::new(resolver).arg(command).output() else {
+    let Ok(output) = hidden_command(resolver).arg(command).output() else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -672,7 +673,7 @@ try {{
 "#
     );
 
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -730,7 +731,7 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(command).args(args).output().ok()?;
+    let output = hidden_command(command).args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -761,7 +762,7 @@ fn run_powershell_script(label: &str, script: &str) -> CommandRunResult {
 
 fn run_command(command: &str, args: &[String]) -> CommandRunResult {
     let command_label = command_label(command, args);
-    match Command::new(command).args(args).output() {
+    match hidden_command(command).args(args).output() {
         Ok(output) => CommandRunResult {
             success: output.status.success(),
             command: command_label,

@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applyCaddyConfig,
+  applyCaddyPublishTestConfig,
   checkManagerUpdate,
   controlPm2App,
   configureDatabaseBackupSchedule,
@@ -486,6 +487,27 @@ export function useAppController() {
     }
   }, [refreshAll, settings]);
 
+  const handleApplyCaddyPublishTestConfig = useCallback(async () => {
+    setBusy("caddy-publish-test");
+    setError(null);
+    setNotice(null);
+    setCaddyApplyResult(null);
+    try {
+      const result = await applyCaddyPublishTestConfig(settings);
+      setCaddyApplyResult(result);
+      setCaddyStatus(result.status);
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+      setNotice(`${result.message} Test with the VPS public IP over HTTP while DNS still points elsewhere.`);
+      await refreshCaddyStatus();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [refreshCaddyStatus, settings]);
+
   const handleInstallSoftwarePackage = useCallback(
     async (packageId: SoftwarePackageId) => {
       setBusy(`software:${packageId}`);
@@ -655,6 +677,7 @@ export function useAppController() {
     handleBrowsePackage,
     handleConfigureDatabaseSchedule,
     handleApplyCaddyConfig,
+    handleApplyCaddyPublishTestConfig,
     handleDeploy,
     handleInstallBundledCaddy,
     handleInstallCaddyZip,
