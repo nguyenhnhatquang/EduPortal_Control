@@ -9,12 +9,15 @@ import {
   RefreshCw,
   Save,
   ScrollText,
+  ShieldCheck,
   Square,
   XCircle,
 } from "lucide-react";
+import { Fragment } from "react";
 import { formatBytes, statusClassName } from "../../shared/formatters";
 import type {
   CaddyCommandResult,
+  CaddyFirewallResult,
   CaddyStatus,
   ManagedAppName,
   Pm2Action,
@@ -31,11 +34,13 @@ interface CaddyTabProps {
   process: Pm2Process | null;
   installResult: CaddyCommandResult | null;
   applyResult: CaddyCommandResult | null;
+  firewallResult: CaddyFirewallResult | null;
   busy: string | null;
   pm2Enabled: boolean;
   onBrowseZip: () => void;
   onInstall: () => void;
   onInstallBundled: () => void;
+  onConfigureFirewall: () => void;
   onApply: () => void;
   onApplyPublishTest: () => void;
   onPm2Action: (appName: ManagedAppName, action: Pm2Action) => void;
@@ -52,11 +57,13 @@ export function CaddyTab({
   process,
   installResult,
   applyResult,
+  firewallResult,
   busy,
   pm2Enabled,
   onBrowseZip,
   onInstall,
   onInstallBundled,
+  onConfigureFirewall,
   onApply,
   onApplyPublishTest,
   onPm2Action,
@@ -103,6 +110,13 @@ export function CaddyTab({
             <dt>Caddyfile</dt>
             <dd>{status?.configPath ?? caddy.configPath}</dd>
           </dl>
+
+          <div className="button-row">
+            <button className="secondary-button" onClick={onConfigureFirewall} disabled={busy === "caddy-firewall"}>
+              {busy === "caddy-firewall" ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+              Open Firewall
+            </button>
+          </div>
         </div>
 
         <div className="panel">
@@ -136,6 +150,7 @@ export function CaddyTab({
       </div>
 
       {installResult && <CaddyResultPanel result={installResult} />}
+      {firewallResult && <CaddyFirewallResultPanel result={firewallResult} />}
 
       <div className="panel">
         <div className="panel-heading">
@@ -280,6 +295,33 @@ function CaddyProcessPanel({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function CaddyFirewallResultPanel({ result }: { result: CaddyFirewallResult }) {
+  return (
+    <div className={`panel operation-result ${result.success ? "valid" : "invalid"}`}>
+      <div className="operation-result-heading">
+        {result.success ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
+        <strong>{result.message}</strong>
+      </div>
+      <dl className="details caddy-result-details">
+        {result.rules.map((rule) => (
+          <Fragment key={`${rule.name}-${rule.port}`}>
+            <dt>Port {rule.port}</dt>
+            <dd>{rule.success ? "Allowed" : rule.message}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {result.rules.some((rule) => rule.stdout || rule.stderr) && (
+        <pre>
+          {result.rules
+            .flatMap((rule) => [rule.stdout, rule.stderr])
+            .filter(Boolean)
+            .join("\n")}
+        </pre>
+      )}
     </div>
   );
 }

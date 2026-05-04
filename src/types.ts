@@ -148,6 +148,24 @@ export interface CaddyCommandResult {
   pm2: Pm2CommandResult | null;
 }
 
+export interface CaddyFirewallResult {
+  attempted: boolean;
+  skipped: boolean;
+  success: boolean;
+  message: string;
+  rules: CaddyFirewallRuleResult[];
+}
+
+export interface CaddyFirewallRuleResult {
+  name: string;
+  port: number;
+  success: boolean;
+  command: string;
+  stdout: string;
+  stderr: string;
+  message: string;
+}
+
 export interface MigrationResult {
   success: boolean;
   url: string;

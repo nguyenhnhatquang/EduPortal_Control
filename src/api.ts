@@ -4,6 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import type {
   CaddyCommandResult,
+  CaddyFirewallResult,
   CaddyStatus,
   DatabaseBackupListing,
   DatabaseCommandResult,
@@ -319,6 +320,38 @@ export async function getCaddyStatus() {
     } satisfies CaddyStatus;
   }
   return invoke<CaddyStatus>("get_caddy_status");
+}
+
+export async function configureCaddyFirewall() {
+  if (!isTauriRuntime()) {
+    return {
+      attempted: false,
+      skipped: true,
+      success: true,
+      message: "Windows Firewall preview completed.",
+      rules: [
+        {
+          name: "EduClassControl Caddy HTTP 80",
+          port: 80,
+          success: true,
+          command: "netsh advfirewall firewall add rule ... localport=80",
+          stdout: "",
+          stderr: "",
+          message: "Inbound TCP port 80 is allowed.",
+        },
+        {
+          name: "EduClassControl Caddy HTTPS 443",
+          port: 443,
+          success: true,
+          command: "netsh advfirewall firewall add rule ... localport=443",
+          stdout: "",
+          stderr: "",
+          message: "Inbound TCP port 443 is allowed.",
+        },
+      ],
+    } satisfies CaddyFirewallResult;
+  }
+  return invoke<CaddyFirewallResult>("configure_caddy_firewall");
 }
 
 export async function installCaddyZip(zipPath: string, settings: Settings) {

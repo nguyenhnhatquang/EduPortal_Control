@@ -4,6 +4,7 @@ import {
   applyCaddyConfig,
   applyCaddyPublishTestConfig,
   checkManagerUpdate,
+  configureCaddyFirewall,
   controlPm2App,
   configureDatabaseBackupSchedule,
   deployPackage,
@@ -43,6 +44,7 @@ import { fallbackSettings } from "../domain/settings/defaults";
 import { errorMessage } from "../shared/errors";
 import type {
   CaddyCommandResult,
+  CaddyFirewallResult,
   CaddyStatus,
   DatabaseBackupFile,
   DatabaseCommandResult,
@@ -98,6 +100,7 @@ export function useAppController() {
   const [caddyStatus, setCaddyStatus] = useState<CaddyStatus | null>(null);
   const [caddyInstallResult, setCaddyInstallResult] = useState<CaddyCommandResult | null>(null);
   const [caddyApplyResult, setCaddyApplyResult] = useState<CaddyCommandResult | null>(null);
+  const [caddyFirewallResult, setCaddyFirewallResult] = useState<CaddyFirewallResult | null>(null);
   const [softwarePackages, setSoftwarePackages] = useState<SoftwarePackageStatus[]>([]);
   const [softwareInstallResult, setSoftwareInstallResult] = useState<SoftwareInstallResult | null>(null);
   const [managerUpdate, setManagerUpdate] = useState<ManagerUpdateInfo | null>(null);
@@ -466,6 +469,25 @@ export function useAppController() {
     }
   }, [refreshCaddyStatus, settings]);
 
+  const handleConfigureCaddyFirewall = useCallback(async () => {
+    setBusy("caddy-firewall");
+    setError(null);
+    setNotice(null);
+    setCaddyFirewallResult(null);
+    try {
+      const result = await configureCaddyFirewall();
+      setCaddyFirewallResult(result);
+      if (!result.success) {
+        throw new Error(result.message);
+      }
+      setNotice(result.message);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
   const handleApplyCaddyConfig = useCallback(async () => {
     setBusy("caddy-apply");
     setError(null);
@@ -643,6 +665,7 @@ export function useAppController() {
     activeTab,
     busy,
     caddyApplyResult,
+    caddyFirewallResult,
     caddyInstallResult,
     caddyProcess,
     caddyStatus,
@@ -676,6 +699,7 @@ export function useAppController() {
     handleBrowseDatabaseRestoreFile,
     handleBrowsePackage,
     handleConfigureDatabaseSchedule,
+    handleConfigureCaddyFirewall,
     handleApplyCaddyConfig,
     handleApplyCaddyPublishTestConfig,
     handleDeploy,

@@ -72,6 +72,10 @@ pub(crate) fn get_caddy_status_blocking(app: AppHandle) -> Result<CaddyStatus, S
     Ok(services::caddy::caddy_status(&settings))
 }
 
+pub(crate) fn configure_caddy_firewall_blocking() -> Result<CaddyFirewallResult, String> {
+    Ok(services::caddy::ensure_caddy_firewall_rules())
+}
+
 pub(crate) fn install_caddy_zip_blocking(
     app: AppHandle,
     zip_path: String,
@@ -1340,6 +1344,7 @@ pub fn run() {
             commands::restore_database_backup,
             commands::configure_database_backup_schedule,
             commands::get_caddy_status,
+            commands::configure_caddy_firewall,
             commands::install_caddy_zip,
             commands::install_bundled_caddy,
             commands::apply_caddy_config,

@@ -108,11 +108,13 @@ function App() {
             process={controller.caddyProcess}
             installResult={controller.caddyInstallResult}
             applyResult={controller.caddyApplyResult}
+            firewallResult={controller.caddyFirewallResult}
             busy={controller.busy}
             pm2Enabled={Boolean(controller.status?.pm2ExecutionEnabled)}
             onBrowseZip={controller.handleBrowseCaddyZip}
             onInstall={controller.handleInstallCaddyZip}
             onInstallBundled={controller.handleInstallBundledCaddy}
+            onConfigureFirewall={controller.handleConfigureCaddyFirewall}
             onApply={controller.handleApplyCaddyConfig}
             onApplyPublishTest={controller.handleApplyCaddyPublishTestConfig}
             onPm2Action={controller.handlePm2Action}

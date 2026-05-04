@@ -8,6 +8,8 @@ pub(crate) const PORTAL_INDEX: &str = "Portal/build/index.js";
 pub(crate) const WEBAPI_EXE: &str = "WebApi/WebApi.exe";
 pub(crate) const DATABASE_BACKUP_TASK_NAME: &str = "EduPortal_Control PostgreSQL Backup";
 pub(crate) const CADDY_APP_NAME: &str = "Caddy";
+pub(crate) const CADDY_HTTP_FIREWALL_RULE_NAME: &str = "EduClassControl Caddy HTTP 80";
+pub(crate) const CADDY_HTTPS_FIREWALL_RULE_NAME: &str = "EduClassControl Caddy HTTPS 443";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -220,6 +222,28 @@ pub struct CaddyCommandResult {
     pub message: String,
     pub status: CaddyStatus,
     pub pm2: Option<Pm2CommandResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddyFirewallResult {
+    pub attempted: bool,
+    pub skipped: bool,
+    pub success: bool,
+    pub message: String,
+    pub rules: Vec<CaddyFirewallRuleResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddyFirewallRuleResult {
+    pub name: String,
+    pub port: u16,
+    pub success: bool,
+    pub command: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -7,7 +7,10 @@ use std::{
 use zip::ZipArchive;
 
 use crate::{
-    domain::{CaddyCommandResult, CaddyStatus, Settings},
+    domain::{
+        CaddyCommandResult, CaddyFirewallResult, CaddyFirewallRuleResult, CaddyStatus, Settings,
+        CADDY_HTTPS_FIREWALL_RULE_NAME, CADDY_HTTP_FIREWALL_RULE_NAME,
+    },
     runtime::{command_version, display_path, hidden_command, looks_windows_path},
     services::pm2,
     storage::write_json,
@@ -140,6 +143,54 @@ pub(crate) fn install_caddy_zip(
         status,
         pm2: None,
     })
+}
+
+pub(crate) fn ensure_caddy_firewall_rules() -> CaddyFirewallResult {
+    let rule_specs = [
+        (CADDY_HTTP_FIREWALL_RULE_NAME, 80_u16),
+        (CADDY_HTTPS_FIREWALL_RULE_NAME, 443_u16),
+    ];
+
+    if !cfg!(windows) {
+        return CaddyFirewallResult {
+            attempted: false,
+            skipped: true,
+            success: true,
+            message: "Windows Firewall rules are only configured on Windows Server.".to_string(),
+            rules: rule_specs
+                .into_iter()
+                .map(|(name, port)| CaddyFirewallRuleResult {
+                    name: name.to_string(),
+                    port,
+                    success: true,
+                    command: String::new(),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    message: "Skipped outside Windows.".to_string(),
+                })
+                .collect(),
+        };
+    }
+
+    let rules: Vec<CaddyFirewallRuleResult> = rule_specs
+        .into_iter()
+        .map(|(name, port)| ensure_firewall_rule(name, port))
+        .collect();
+    let success = rules.iter().all(|rule| rule.success);
+    let message = if success {
+        "Windows Firewall allows inbound Caddy HTTP/HTTPS ports.".to_string()
+    } else {
+        "Failed to configure one or more Windows Firewall rules. Run the app as Administrator."
+            .to_string()
+    };
+
+    CaddyFirewallResult {
+        attempted: true,
+        skipped: false,
+        success,
+        message,
+        rules,
+    }
 }
 
 pub(crate) fn apply_caddy_config(settings: &Settings) -> Result<CaddyCommandResult, String> {
@@ -352,6 +403,61 @@ fn caddy_executable_name() -> &'static str {
     "caddy.exe"
 }
 
+fn ensure_firewall_rule(name: &str, port: u16) -> CaddyFirewallRuleResult {
+    let delete_args = vec![
+        "advfirewall".to_string(),
+        "firewall".to_string(),
+        "delete".to_string(),
+        "rule".to_string(),
+        format!("name={name}"),
+    ];
+    let delete = run_program_command("netsh.exe", &delete_args);
+
+    let add_args = vec![
+        "advfirewall".to_string(),
+        "firewall".to_string(),
+        "add".to_string(),
+        "rule".to_string(),
+        format!("name={name}"),
+        "dir=in".to_string(),
+        "action=allow".to_string(),
+        "protocol=TCP".to_string(),
+        format!("localport={port}"),
+        "profile=any".to_string(),
+    ];
+    let add = run_program_command("netsh.exe", &add_args);
+    let command = join_command_output(&delete.command, &add.command);
+    let delete_stdout = if delete.success {
+        delete.stdout
+    } else {
+        String::new()
+    };
+    let delete_stderr = if delete.success {
+        delete.stderr
+    } else {
+        String::new()
+    };
+    let stdout = join_command_output(&delete_stdout, &add.stdout);
+    let stderr = join_command_output(&delete_stderr, &add.stderr);
+    let message = if add.success {
+        format!("Inbound TCP port {port} is allowed.")
+    } else if add.stderr.is_empty() {
+        format!("Failed to allow inbound TCP port {port}.")
+    } else {
+        add.stderr.clone()
+    };
+
+    CaddyFirewallRuleResult {
+        name: name.to_string(),
+        port,
+        success: add.success,
+        command,
+        stdout,
+        stderr,
+        message,
+    }
+}
+
 struct CommandRunResult {
     success: bool,
     command: String,
@@ -361,6 +467,24 @@ struct CommandRunResult {
 
 fn run_command(command: &Path, args: &[String]) -> CommandRunResult {
     let command_text = command_label(command, args);
+    match hidden_command(command).args(args).output() {
+        Ok(output) => CommandRunResult {
+            success: output.status.success(),
+            command: command_text,
+            stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        },
+        Err(err) => CommandRunResult {
+            success: false,
+            command: command_text,
+            stdout: String::new(),
+            stderr: err.to_string(),
+        },
+    }
+}
+
+fn run_program_command(command: &str, args: &[String]) -> CommandRunResult {
+    let command_text = command_label(Path::new(command), args);
     match hidden_command(command).args(args).output() {
         Ok(output) => CommandRunResult {
             success: output.status.success(),
