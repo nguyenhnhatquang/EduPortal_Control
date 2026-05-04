@@ -3,11 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applyCaddyConfig,
   applyCaddyPublishTestConfig,
+  checkPortalRelease,
   checkManagerUpdate,
   configureCaddyFirewall,
   controlPm2App,
   configureDatabaseBackupSchedule,
   deployPackage,
+  deployPortalRelease,
   getCaddyStatus,
   getSettings,
   getSystemStatus,
@@ -60,6 +62,7 @@ import type {
   PackageValidation,
   Pm2Action,
   Pm2Process,
+  PortalReleaseCheckResult,
   Settings,
   SoftwareInstallResult,
   SoftwarePackageId,
@@ -106,6 +109,7 @@ export function useAppController() {
   const [softwareInstallResult, setSoftwareInstallResult] = useState<SoftwareInstallResult | null>(null);
   const [managerUpdate, setManagerUpdate] = useState<ManagerUpdateInfo | null>(null);
   const [managerUpdateProgress, setManagerUpdateProgress] = useState<ManagerUpdateProgress | null>(null);
+  const [portalReleaseCheck, setPortalReleaseCheck] = useState<PortalReleaseCheckResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -321,6 +325,65 @@ export function useAppController() {
       setBusy(null);
     }
   }, [packagePath, refreshAll, settings]);
+
+  const handleCheckPortalRelease = useCallback(async () => {
+    setBusy("portal-release-check");
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await checkPortalRelease(settings);
+      setPortalReleaseCheck(result);
+      setNotice(result.message);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [settings]);
+
+  const handleDeployPortalRelease = useCallback(async () => {
+    const release = portalReleaseCheck?.latest;
+    const confirmed = window.confirm(
+      release
+        ? `Deploy Portal release ${release.tagName}? Portal and WebApi will reload through PM2.`
+        : "Deploy the latest Portal release? Portal and WebApi will reload through PM2.",
+    );
+    if (!confirmed) return;
+
+    const runningSteps = createDeploySteps(settings);
+    setDeploySteps(runningSteps);
+    setBusy("portal-release-deploy");
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await deployPortalRelease(settings);
+      const postDeploySummary = result.postDeploy
+        .filter((step) => !step.skipped)
+        .map((step) => step.message)
+        .join(" ");
+      setNotice([result.deployment.releaseTag ? `Portal ${result.deployment.releaseTag} deployed.` : "", postDeploySummary, result.pm2.message].filter(Boolean).join(" "));
+      setDeploySteps(buildDeployStepsFromResult(settings, result));
+      setValidation(null);
+      if (result.deployment.releaseTag) {
+        setPortalReleaseCheck((current) =>
+          current?.latest
+            ? {
+                ...current,
+                updateAvailable: false,
+                activeReleaseTag: result.deployment.releaseTag,
+                message: `Portal release ${result.deployment.releaseTag} is active.`,
+              }
+            : current,
+        );
+      }
+      await refreshAll();
+    } catch (err) {
+      setDeploySteps((steps) => failActiveDeployStep(steps.length ? steps : runningSteps));
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [portalReleaseCheck?.latest, refreshAll, settings]);
 
   const handleSaveSettings = useCallback(async () => {
     setBusy("save");
@@ -688,6 +751,7 @@ export function useAppController() {
     migrationResult,
     notice,
     packagePath,
+    portalReleaseCheck,
     pm2Processes,
     settings,
     softwareInstallResult,
@@ -703,7 +767,9 @@ export function useAppController() {
     handleConfigureCaddyFirewall,
     handleApplyCaddyConfig,
     handleApplyCaddyPublishTestConfig,
+    handleCheckPortalRelease,
     handleDeploy,
+    handleDeployPortalRelease,
     handleInstallBundledCaddy,
     handleInstallCaddyZip,
     handleCheckManagerUpdate,

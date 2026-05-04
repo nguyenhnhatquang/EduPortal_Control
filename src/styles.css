@@ -901,6 +901,7 @@ td {
 .settings-grid label,
 .migration-settings-grid label,
 .database-settings-grid label,
+.release-settings-grid label,
 .backup-settings-grid label,
 .database-form-grid label,
 .database-schedule-grid label,
@@ -915,6 +916,7 @@ td {
 .settings-grid label span,
 .migration-settings-grid label span,
 .database-settings-grid label span,
+.release-settings-grid label > span,
 .backup-settings-grid label span,
 .database-form-grid label span,
 .database-schedule-grid label > span,
@@ -947,6 +949,45 @@ td {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.release-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.release-update-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.release-update-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.release-update-details span {
+  display: block;
+  margin-bottom: 4px;
+  color: #607181;
+  font-size: 12px;
+}
+
+.release-update-details strong {
+  display: block;
+  color: #20303c;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.release-update-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .backup-settings-grid {
@@ -1095,6 +1136,7 @@ td {
 }
 
 .post-deploy-grid .toggle-row > span,
+.release-settings-grid .toggle-row > span,
 .database-schedule-grid .toggle-row > span,
 .caddy-settings-grid .toggle-row > span {
   margin: 0;
@@ -1195,6 +1237,9 @@ td {
   .migration-settings-grid,
   .database-summary,
   .database-settings-grid,
+  .release-settings-grid,
+  .release-update-grid,
+  .release-update-details,
   .backup-settings-grid,
   .database-action-grid,
   .database-form-grid,
@@ -1209,6 +1254,10 @@ td {
 
   .span-2 {
     grid-column: auto;
+  }
+
+  .release-update-actions {
+    flex-wrap: wrap;
   }
 
   .package-row,

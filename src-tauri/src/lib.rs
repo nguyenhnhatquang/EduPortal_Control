@@ -173,12 +173,91 @@ pub(crate) fn validate_package_blocking(zip_path: String) -> Result<PackageValid
     validate_package_path(Path::new(&zip_path))
 }
 
+#[derive(Debug, Clone, Default)]
+struct DeploymentSourceMetadata {
+    release_tag: Option<String>,
+    release_asset_name: Option<String>,
+    release_digest: Option<String>,
+}
+
 pub(crate) fn deploy_package_blocking(
     app: AppHandle,
     zip_path: String,
     settings: Settings,
 ) -> Result<DeployResult, String> {
     let settings = save_settings(&app, settings)?;
+    deploy_package_with_metadata(app, zip_path, settings, DeploymentSourceMetadata::default())
+}
+
+pub(crate) fn check_portal_release_blocking(
+    app: AppHandle,
+    settings: Settings,
+) -> Result<PortalReleaseCheckResult, String> {
+    let settings = sanitize_settings(settings);
+    let state = load_state(&app)?;
+    let active_release_tag = state
+        .active_deployment_id
+        .as_ref()
+        .and_then(|id| {
+            state
+                .deployments
+                .iter()
+                .find(|deployment| &deployment.id == id)
+        })
+        .and_then(|deployment| deployment.release_tag.clone());
+    services::portal_release::check_latest_release(&settings, active_release_tag)
+}
+
+pub(crate) fn deploy_portal_release_blocking(
+    app: AppHandle,
+    settings: Settings,
+) -> Result<DeployResult, String> {
+    let settings = save_settings(&app, settings)?;
+    emit_deploy_progress(
+        &app,
+        "download",
+        "Download Portal release",
+        "running",
+        "Downloading latest GitHub release asset.",
+    );
+    let download = match services::portal_release::download_latest_release(&app, &settings) {
+        Ok(download) => download,
+        Err(err) => {
+            emit_deploy_progress(&app, "download", "Download Portal release", "failed", &err);
+            return Err(err);
+        }
+    };
+    emit_deploy_progress(
+        &app,
+        "download",
+        "Download Portal release",
+        "done",
+        &format!(
+            "Downloaded {} to {}.",
+            download.release.asset_name,
+            services::portal_release::display_download_path(&download)
+        ),
+    );
+
+    let metadata = DeploymentSourceMetadata {
+        release_tag: Some(download.release.tag_name.clone()),
+        release_asset_name: Some(download.release.asset_name.clone()),
+        release_digest: download.release.asset_digest.clone(),
+    };
+    deploy_package_with_metadata(
+        app,
+        services::portal_release::display_download_path(&download),
+        settings,
+        metadata,
+    )
+}
+
+fn deploy_package_with_metadata(
+    app: AppHandle,
+    zip_path: String,
+    settings: Settings,
+    metadata: DeploymentSourceMetadata,
+) -> Result<DeployResult, String> {
     let zip_path_buf = PathBuf::from(&zip_path);
     emit_deploy_progress(
         &app,
@@ -313,6 +392,9 @@ pub(crate) fn deploy_package_blocking(
         config_path: display_path(&config_path),
         portal_env: settings.portal_env.clone(),
         web_api_env: settings.web_api_env.clone(),
+        release_tag: metadata.release_tag,
+        release_asset_name: metadata.release_asset_name,
+        release_digest: metadata.release_digest,
     };
 
     state
@@ -1299,6 +1381,8 @@ pub fn run() {
             commands::get_system_status,
             commands::validate_package,
             commands::deploy_package,
+            commands::check_portal_release,
+            commands::deploy_portal_release,
             commands::list_deployments,
             commands::rollback_deployment,
             commands::read_log,
@@ -1333,6 +1417,48 @@ mod tests {
             settings.portal_env.get("BODY_SIZE_LIMIT"),
             Some(&"10M".to_string())
         );
+    }
+
+    #[test]
+    fn settings_without_portal_release_gets_defaults() {
+        let mut value = serde_json::to_value(default_settings()).expect("settings json");
+        value
+            .as_object_mut()
+            .expect("settings object")
+            .remove("portalRelease");
+
+        let settings: Settings = serde_json::from_value(value).expect("deserialize settings");
+        let settings = sanitize_settings(settings);
+
+        assert!(settings.portal_release.enabled);
+        assert_eq!(settings.portal_release.owner, "nguyenhnhatquang");
+        assert_eq!(settings.portal_release.repo, "EduPortal_DiemSensei");
+        assert_eq!(
+            settings.portal_release.asset_name_prefix,
+            "EduPortal_DiemSensei_"
+        );
+        assert_eq!(settings.portal_release.asset_name_suffix, ".zip");
+    }
+
+    #[test]
+    fn deployment_record_without_release_metadata_deserializes() {
+        let json = r#"
+        {
+          "id": "deploy_20260504_120000",
+          "createdAt": "2026-05-04T12:00:00+07:00",
+          "sourceZip": "C:\\deploy\\package.zip",
+          "deploymentPath": "C:\\deploy\\deploy_20260504_120000",
+          "configPath": "C:\\deploy\\deploy_20260504_120000\\config.json",
+          "portalEnv": {},
+          "webApiEnv": {}
+        }
+        "#;
+
+        let record: DeploymentRecord = serde_json::from_str(json).expect("deployment record");
+
+        assert_eq!(record.release_tag, None);
+        assert_eq!(record.release_asset_name, None);
+        assert_eq!(record.release_digest, None);
     }
 
     #[test]

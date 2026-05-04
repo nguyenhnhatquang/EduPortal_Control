@@ -33,6 +33,16 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
     });
   }
 
+  function updatePortalRelease(next: Partial<typeof settings.portalRelease>) {
+    setSettings({
+      ...settings,
+      portalRelease: {
+        ...settings.portalRelease,
+        ...next,
+      },
+    });
+  }
+
   return (
     <section className="stack settings-page">
       <div className="settings-overview">
@@ -45,6 +55,14 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
           <strong>
             {settings.portalInstallDependencies ? "npm install" : "Skip npm install"}
             {settings.portalAssetCopy.enabled ? " + copy assets" : ""}
+          </strong>
+        </div>
+        <div className="settings-summary-item">
+          <span>Portal release</span>
+          <strong>
+            {settings.portalRelease.enabled
+              ? `${settings.portalRelease.owner}/${settings.portalRelease.repo}`
+              : "Disabled"}
           </strong>
         </div>
         <div className="settings-summary-item">
@@ -131,6 +149,60 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
                 <input
                   value={settings.portalAssetCopy.destination}
                   onChange={(event) => updatePortalAssetCopy({ destination: event.target.value })}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title">
+              <strong>Portal release source</strong>
+              <span>Private GitHub release checked by the Deployments tab.</span>
+            </div>
+
+            <div className="release-settings-grid">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.portalRelease.enabled}
+                  onChange={(event) => updatePortalRelease({ enabled: event.target.checked })}
+                />
+                <span>Enable release updates</span>
+              </label>
+              <label>
+                <span>Owner</span>
+                <input
+                  value={settings.portalRelease.owner}
+                  onChange={(event) => updatePortalRelease({ owner: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Repository</span>
+                <input
+                  value={settings.portalRelease.repo}
+                  onChange={(event) => updatePortalRelease({ repo: event.target.value })}
+                />
+              </label>
+              <label className="span-2">
+                <span>GitHub PAT</span>
+                <input
+                  type="password"
+                  value={settings.portalRelease.token}
+                  onChange={(event) => updatePortalRelease({ token: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Asset prefix</span>
+                <input
+                  value={settings.portalRelease.assetNamePrefix}
+                  onChange={(event) => updatePortalRelease({ assetNamePrefix: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Asset suffix</span>
+                <input
+                  value={settings.portalRelease.assetNameSuffix}
+                  onChange={(event) => updatePortalRelease({ assetNameSuffix: event.target.value })}
                 />
               </label>
             </div>

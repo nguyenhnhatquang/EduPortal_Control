@@ -66,6 +66,10 @@ export function markDeployStep(steps: DeployStepView[], id: string, state: Deplo
 }
 
 export function failActiveDeployStep(steps: DeployStepView[]): DeployStepView[] {
+  if (steps.some((step) => step.state === "failed")) {
+    return steps;
+  }
+
   const runningIndex = steps.findIndex((step) => step.state === "running");
   if (runningIndex >= 0) {
     return steps.map((step, index) => (index === runningIndex ? { ...step, state: "failed" } : step));

@@ -54,12 +54,16 @@ function App() {
             packagePath={controller.packagePath}
             setPackagePath={controller.setPackagePath}
             validation={controller.validation}
+            portalReleaseCheck={controller.portalReleaseCheck}
+            portalReleaseReady={controller.settings.portalRelease.enabled && Boolean(controller.settings.portalRelease.token.trim())}
             deploySteps={controller.deploySteps}
             deployments={controller.deployments}
             busy={controller.busy}
             onBrowse={controller.handleBrowsePackage}
             onValidate={controller.handleValidatePackage}
             onDeploy={controller.handleDeploy}
+            onCheckPortalRelease={controller.handleCheckPortalRelease}
+            onDeployPortalRelease={controller.handleDeployPortalRelease}
             onRollback={controller.handleRollback}
           />
         )}

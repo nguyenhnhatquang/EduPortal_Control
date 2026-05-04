@@ -68,4 +68,12 @@ export const fallbackSettings: Settings = {
 }
 `,
   },
+  portalRelease: {
+    enabled: true,
+    owner: "nguyenhnhatquang",
+    repo: "EduPortal_DiemSensei",
+    token: "",
+    assetNamePrefix: "EduPortal_DiemSensei_",
+    assetNameSuffix: ".zip",
+  },
 };

@@ -43,6 +43,15 @@ export interface CaddySettings {
   config: string;
 }
 
+export interface PortalReleaseSettings {
+  enabled: boolean;
+  owner: string;
+  repo: string;
+  token: string;
+  assetNamePrefix: string;
+  assetNameSuffix: string;
+}
+
 export interface Settings {
   deployRoot: string;
   retention: number;
@@ -55,6 +64,7 @@ export interface Settings {
   migrationTimeoutSecs: number;
   database: DatabaseSettings;
   caddy: CaddySettings;
+  portalRelease: PortalReleaseSettings;
 }
 
 export interface DeploymentRecord {
@@ -65,6 +75,9 @@ export interface DeploymentRecord {
   configPath: string;
   portalEnv: EnvMap;
   webApiEnv: EnvMap;
+  releaseTag: string | null;
+  releaseAssetName: string | null;
+  releaseDigest: string | null;
 }
 
 export interface DeploymentState {
@@ -97,6 +110,24 @@ export interface ManagerUpdateInfo {
 export interface ManagerUpdateProgress {
   downloadedBytes: number;
   contentLength: number | null;
+}
+
+export interface PortalReleaseInfo {
+  tagName: string;
+  releaseName: string | null;
+  publishedAt: string | null;
+  body: string | null;
+  htmlUrl: string;
+  assetName: string;
+  assetSize: number;
+  assetDigest: string | null;
+}
+
+export interface PortalReleaseCheckResult {
+  updateAvailable: boolean;
+  activeReleaseTag: string | null;
+  latest: PortalReleaseInfo | null;
+  message: string;
 }
 
 export type SoftwarePackageId = "nodejs" | "pm2" | "postgresql";

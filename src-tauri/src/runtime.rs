@@ -42,6 +42,9 @@ pub(crate) fn hidden_command<S: AsRef<OsStr>>(program: S) -> Command {
 }
 
 pub(crate) fn hide_command_window(command: &mut Command) {
+    #[cfg(not(windows))]
+    let _ = command;
+
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

@@ -19,6 +19,7 @@ import type {
   Pm2Action,
   Pm2CommandResult,
   Pm2Process,
+  PortalReleaseCheckResult,
   RollbackResult,
   Settings,
   SoftwareInstallResult,
@@ -78,6 +79,14 @@ const mockSettings: Settings = {
     reverse_proxy localhost:8080
 }
 `,
+  },
+  portalRelease: {
+    enabled: true,
+    owner: "nguyenhnhatquang",
+    repo: "EduPortal_DiemSensei",
+    token: "",
+    assetNamePrefix: "EduPortal_DiemSensei_",
+    assetNameSuffix: ".zip",
   },
 };
 
@@ -482,6 +491,31 @@ export async function validatePackage(zipPath: string) {
 
 export async function deployPackage(zipPath: string, settings: Settings) {
   return invoke<DeployResult>("deploy_package", { zipPath, settings });
+}
+
+export async function checkPortalRelease(settings: Settings) {
+  if (!isTauriRuntime()) {
+    return {
+      updateAvailable: true,
+      activeReleaseTag: null,
+      latest: {
+        tagName: "v0.0.0-preview",
+        releaseName: "Portal preview",
+        publishedAt: new Date().toISOString(),
+        body: null,
+        htmlUrl: `https://github.com/${settings.portalRelease.owner}/${settings.portalRelease.repo}/releases/latest`,
+        assetName: `${settings.portalRelease.assetNamePrefix}v0.0.0-preview${settings.portalRelease.assetNameSuffix}`,
+        assetSize: 0,
+        assetDigest: null,
+      },
+      message: "Portal release preview is available.",
+    } satisfies PortalReleaseCheckResult;
+  }
+  return invoke<PortalReleaseCheckResult>("check_portal_release", { settings });
+}
+
+export async function deployPortalRelease(settings: Settings) {
+  return invoke<DeployResult>("deploy_portal_release", { settings });
 }
 
 export async function listDeployments() {

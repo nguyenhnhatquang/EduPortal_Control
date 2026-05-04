@@ -32,6 +32,8 @@ pub struct Settings {
     pub database: DatabaseSettings,
     #[serde(default = "default_caddy_settings")]
     pub caddy: CaddySettings,
+    #[serde(default = "default_portal_release_settings")]
+    pub portal_release: PortalReleaseSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +98,23 @@ pub struct CaddySettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PortalReleaseSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_portal_release_owner")]
+    pub owner: String,
+    #[serde(default = "default_portal_release_repo")]
+    pub repo: String,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default = "default_portal_release_asset_prefix")]
+    pub asset_name_prefix: String,
+    #[serde(default = "default_portal_release_asset_suffix")]
+    pub asset_name_suffix: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeploymentRecord {
     pub id: String,
     pub created_at: String,
@@ -104,6 +123,12 @@ pub struct DeploymentRecord {
     pub config_path: String,
     pub portal_env: BTreeMap<String, String>,
     pub web_api_env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub release_tag: Option<String>,
+    #[serde(default)]
+    pub release_asset_name: Option<String>,
+    #[serde(default)]
+    pub release_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -315,6 +340,28 @@ pub struct DeployResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PortalReleaseInfo {
+    pub tag_name: String,
+    pub release_name: Option<String>,
+    pub published_at: Option<String>,
+    pub body: Option<String>,
+    pub html_url: String,
+    pub asset_name: String,
+    pub asset_size: u64,
+    pub asset_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalReleaseCheckResult {
+    pub update_available: bool,
+    pub active_release_tag: Option<String>,
+    pub latest: Option<PortalReleaseInfo>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RollbackResult {
     pub deployment: DeploymentRecord,
     pub pm2: Pm2CommandResult,
@@ -341,6 +388,7 @@ pub(crate) fn default_settings() -> Settings {
         migration_timeout_secs: default_migration_timeout_secs(),
         database: default_database_settings(),
         caddy: default_caddy_settings(),
+        portal_release: default_portal_release_settings(),
     }
 }
 
@@ -466,6 +514,33 @@ fn default_caddy_settings() -> CaddySettings {
     }
 }
 
+fn default_portal_release_owner() -> String {
+    "nguyenhnhatquang".to_string()
+}
+
+fn default_portal_release_repo() -> String {
+    "EduPortal_DiemSensei".to_string()
+}
+
+fn default_portal_release_asset_prefix() -> String {
+    "EduPortal_DiemSensei_".to_string()
+}
+
+fn default_portal_release_asset_suffix() -> String {
+    ".zip".to_string()
+}
+
+fn default_portal_release_settings() -> PortalReleaseSettings {
+    PortalReleaseSettings {
+        enabled: true,
+        owner: default_portal_release_owner(),
+        repo: default_portal_release_repo(),
+        token: String::new(),
+        asset_name_prefix: default_portal_release_asset_prefix(),
+        asset_name_suffix: default_portal_release_asset_suffix(),
+    }
+}
+
 fn default_deploy_root() -> String {
     if cfg!(windows) {
         "C:\\deploy".to_string()
@@ -525,6 +600,7 @@ pub(crate) fn sanitize_settings(mut settings: Settings) -> Settings {
     settings.migration_timeout_secs = settings.migration_timeout_secs.clamp(5, 600);
     settings.database = sanitize_database_settings(settings.database);
     settings.caddy = sanitize_caddy_settings(settings.caddy);
+    settings.portal_release = sanitize_portal_release_settings(settings.portal_release);
     settings
 }
 
@@ -537,6 +613,27 @@ fn sanitize_caddy_settings(mut caddy: CaddySettings) -> CaddySettings {
         caddy.config = default_caddy_config();
     }
     caddy
+}
+
+fn sanitize_portal_release_settings(mut release: PortalReleaseSettings) -> PortalReleaseSettings {
+    release.owner = release.owner.trim().to_string();
+    if release.owner.is_empty() {
+        release.owner = default_portal_release_owner();
+    }
+    release.repo = release.repo.trim().to_string();
+    if release.repo.is_empty() {
+        release.repo = default_portal_release_repo();
+    }
+    release.token = release.token.trim().to_string();
+    release.asset_name_prefix = release.asset_name_prefix.trim().to_string();
+    if release.asset_name_prefix.is_empty() {
+        release.asset_name_prefix = default_portal_release_asset_prefix();
+    }
+    release.asset_name_suffix = release.asset_name_suffix.trim().to_string();
+    if release.asset_name_suffix.is_empty() {
+        release.asset_name_suffix = default_portal_release_asset_suffix();
+    }
+    release
 }
 
 fn sanitize_database_settings(mut database: DatabaseSettings) -> DatabaseSettings {

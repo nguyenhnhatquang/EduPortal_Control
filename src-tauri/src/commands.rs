@@ -1,18 +1,18 @@
 use crate::{
     apply_caddy_config_blocking, apply_caddy_publish_test_config_blocking,
-    configure_caddy_firewall_blocking, deploy_package_blocking, get_caddy_status_blocking,
-    get_system_status_blocking, install_bundled_caddy_blocking, install_caddy_zip_blocking,
-    install_software_package_blocking, list_database_backups_blocking, list_deployments_blocking,
-    list_software_packages_blocking, read_log_blocking, restore_database_backup_blocking,
-    rollback_deployment_blocking, run_database_backup_blocking, run_migration_blocking,
-    validate_package_blocking,
+    check_portal_release_blocking, configure_caddy_firewall_blocking, deploy_package_blocking,
+    deploy_portal_release_blocking, get_caddy_status_blocking, get_system_status_blocking,
+    install_bundled_caddy_blocking, install_caddy_zip_blocking, install_software_package_blocking,
+    list_database_backups_blocking, list_deployments_blocking, list_software_packages_blocking,
+    read_log_blocking, restore_database_backup_blocking, rollback_deployment_blocking,
+    run_database_backup_blocking, run_migration_blocking, validate_package_blocking,
 };
 use crate::{
     domain::{
         CaddyCommandResult, CaddyFirewallResult, CaddyStatus, DatabaseBackupListing,
         DatabaseCommandResult, DeployResult, DeploymentState, LogReadResult, MigrationResult,
-        PackageValidation, Pm2CommandResult, Pm2Process, RollbackResult, Settings,
-        SoftwareInstallResult, SoftwarePackageStatus, SystemStatus,
+        PackageValidation, Pm2CommandResult, Pm2Process, PortalReleaseCheckResult, RollbackResult,
+        Settings, SoftwareInstallResult, SoftwarePackageStatus, SystemStatus,
     },
     runtime::run_blocking,
     services::pm2::{control_pm2_app_blocking, list_pm2_processes_blocking},
@@ -154,6 +154,28 @@ pub async fn deploy_package(
 ) -> Result<DeployResult, String> {
     run_blocking("deploy package", move || {
         deploy_package_blocking(app, zip_path, settings)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn check_portal_release(
+    app: AppHandle,
+    settings: Settings,
+) -> Result<PortalReleaseCheckResult, String> {
+    run_blocking("check Portal release", move || {
+        check_portal_release_blocking(app, settings)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn deploy_portal_release(
+    app: AppHandle,
+    settings: Settings,
+) -> Result<DeployResult, String> {
+    run_blocking("deploy Portal release", move || {
+        deploy_portal_release_blocking(app, settings)
     })
     .await
 }
