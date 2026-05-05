@@ -149,18 +149,18 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
                   checked={settings.portalAssetCopy.enabled}
                   onChange={(event) => updatePortalAssetCopy({ enabled: event.target.checked })}
                 />
-                <span>Copy folder into Portal build/client</span>
+                <span>Install folder or .zip into Portal build/client</span>
               </label>
 
               <label>
-                <span>Copy source, absolute or relative to deploy root</span>
+                <span>Asset source folder or .zip, absolute or relative to deploy root</span>
                 <input
                   value={settings.portalAssetCopy.source}
                   onChange={(event) => updatePortalAssetCopy({ source: event.target.value })}
                 />
               </label>
               <label>
-                <span>Copy destination, relative to Portal</span>
+                <span>Asset destination, relative to Portal</span>
                 <input
                   value={settings.portalAssetCopy.destination}
                   onChange={(event) => updatePortalAssetCopy({ destination: event.target.value })}

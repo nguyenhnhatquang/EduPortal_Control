@@ -2,6 +2,8 @@ import type { DeployProgressEvent, Settings } from "../../types";
 import { fallbackSettings } from "../settings/defaults";
 import type { DeployStepState, DeployStepView } from "./types";
 
+const deployStepOrder = ["download", "validate", "extract", "npm", "asset", "config", "pm2", "history", "cleanup"];
+
 export function createDeploySteps(settings: Settings = fallbackSettings): DeployStepView[] {
   return [
     {
@@ -24,9 +26,9 @@ export function createDeploySteps(settings: Settings = fallbackSettings): Deploy
     },
     {
       id: "asset",
-      label: "Copy Portal assets",
+      label: "Install Portal assets",
       detail: settings.portalAssetCopy.enabled
-        ? `Copy ${settings.portalAssetCopy.source} to ${settings.portalAssetCopy.destination}.`
+        ? `Copy or extract ${settings.portalAssetCopy.source} to ${settings.portalAssetCopy.destination}.`
         : "Disabled in settings.",
       state: settings.portalAssetCopy.enabled ? "pending" : "skipped",
     },
@@ -102,8 +104,9 @@ export function failActiveDeployStep(steps: DeployStepView[]): DeployStepView[] 
 }
 
 export function applyDeployProgressEvent(steps: DeployStepView[], event: DeployProgressEvent): DeployStepView[] {
+  const baseSteps = shouldResetForNewRun(steps, event) ? resetDeployStepStates(steps) : steps;
   let seenTarget = false;
-  const nextSteps = steps.map((step) => {
+  const nextSteps = baseSteps.map((step) => {
     if (step.id === event.stepId) {
       seenTarget = true;
       return {
@@ -121,17 +124,48 @@ export function applyDeployProgressEvent(steps: DeployStepView[], event: DeployP
     return step;
   });
 
-  return nextSteps.some((step) => step.id === event.stepId)
-    ? nextSteps
-    : [
-        ...nextSteps,
-        {
-          id: event.stepId,
-          label: event.label,
-          detail: event.detail,
-          state: event.state,
-        },
-      ];
+  if (nextSteps.some((step) => step.id === event.stepId)) {
+    return nextSteps;
+  }
+
+  return insertDeployStep(nextSteps, {
+    id: event.stepId,
+    label: event.label,
+    detail: event.detail,
+    state: event.state,
+  });
+}
+
+function shouldResetForNewRun(steps: DeployStepView[], event: DeployProgressEvent) {
+  if (event.state !== "running") return false;
+  if (!steps.some((step) => step.state === "done" || step.state === "failed")) return false;
+  if (event.stepId === "download") return true;
+  return event.stepId === "validate" && !steps.some((step) => step.id === "download");
+}
+
+function resetDeployStepStates(steps: DeployStepView[]): DeployStepView[] {
+  return steps.map((step) => ({
+    ...step,
+    state: step.state === "skipped" ? step.state : ("pending" as DeployStepState),
+  }));
+}
+
+function insertDeployStep(steps: DeployStepView[], step: DeployStepView): DeployStepView[] {
+  const targetOrder = deployStepOrder.indexOf(step.id);
+  if (targetOrder < 0) {
+    return [...steps, step];
+  }
+
+  const insertAt = steps.findIndex((existing) => {
+    const existingOrder = deployStepOrder.indexOf(existing.id);
+    return existingOrder >= 0 && existingOrder > targetOrder;
+  });
+
+  if (insertAt < 0) {
+    return [...steps, step];
+  }
+
+  return [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
 }
 
 export function buildDeployStepsFromResult(

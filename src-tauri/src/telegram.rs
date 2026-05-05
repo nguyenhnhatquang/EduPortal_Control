@@ -11,11 +11,13 @@ use reqwest::header::CONTENT_TYPE;
 use tauri::AppHandle;
 
 use crate::{
-    deploy_portal_release_blocking,
-    domain::{TelegramBotSettings, CADDY_APP_NAME},
+    check_portal_release_blocking, deploy_portal_release_blocking,
+    domain::{DeployProgressEvent, TelegramBotSettings, CADDY_APP_NAME},
     get_system_status_blocking, read_log_blocking, run_database_backup_blocking,
+    run_migration_blocking,
     services::pm2::{control_pm2_app_blocking, list_pm2_processes_blocking},
     storage::{load_settings, save_settings},
+    with_deploy_progress_listener,
 };
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org/bot";
@@ -26,6 +28,7 @@ const CONFIRMATION_TTL_SECS: u64 = 120;
 const ACTION_MENU: &str = "menu";
 const ACTION_STATUS: &str = "status";
 const ACTION_BACKUP_DB: &str = "backup_db";
+const ACTION_MIGRATION: &str = "migration";
 const ACTION_DEPLOY_LATEST: &str = "deploy_latest";
 const ACTION_LOGS_MENU: &str = "logs_menu";
 const ACTION_PM2_MENU: &str = "pm2_menu";
@@ -126,6 +129,7 @@ struct CallbackQuery {
     data: Option<String>,
 }
 
+#[derive(Clone)]
 struct TelegramClient {
     token: String,
     http: Client,
@@ -196,6 +200,7 @@ impl TelegramClient {
                     { "command": "menu", "description": "Show control menu" },
                     { "command": "status", "description": "Show app status" },
                     { "command": "backup", "description": "Run database backup" },
+                    { "command": "migration", "description": "Run database migration" },
                     { "command": "logs", "description": "Choose a log target" },
                     { "command": "pm2", "description": "Choose a PM2 restart target" },
                     { "command": "deploy", "description": "Deploy latest Portal release" },
@@ -274,6 +279,7 @@ impl TelegramClient {
 #[derive(Debug, Clone)]
 enum PendingAction {
     DeployLatestRelease,
+    RunMigration,
     RestartPm2(String),
 }
 
@@ -281,6 +287,7 @@ impl PendingAction {
     fn label(&self) -> String {
         match self {
             Self::DeployLatestRelease => "deploy the latest Portal release".to_string(),
+            Self::RunMigration => "run database migration".to_string(),
             Self::RestartPm2(app_name) => format!("restart {app_name} in PM2"),
         }
     }
@@ -288,6 +295,7 @@ impl PendingAction {
     fn started_message(&self) -> String {
         match self {
             Self::DeployLatestRelease => "Portal release deploy started.".to_string(),
+            Self::RunMigration => "Database migration started.".to_string(),
             Self::RestartPm2(app_name) => format!("PM2 restart started for {app_name}."),
         }
     }
@@ -391,6 +399,8 @@ impl BotRunner {
             self.send_status(message.chat.id);
         } else if is_command(&text, "backup") {
             self.run_backup(message.chat.id);
+        } else if is_command(&text, "migration") {
+            self.send_confirmation(message.chat.id, PendingAction::RunMigration);
         } else if is_command(&text, "logs") {
             let _ = self.client.send_menu(
                 message.chat.id,
@@ -475,6 +485,11 @@ impl BotRunner {
             }
             ACTION_STATUS => self.send_status(message.chat.id),
             ACTION_BACKUP_DB => self.run_backup(message.chat.id),
+            ACTION_MIGRATION => self.ask_confirmation(
+                message.chat.id,
+                message.message_id,
+                PendingAction::RunMigration,
+            ),
             ACTION_DEPLOY_LATEST => self.ask_confirmation(
                 message.chat.id,
                 message.message_id,
@@ -537,27 +552,30 @@ impl BotRunner {
     }
 
     fn ask_confirmation(&mut self, chat_id: i64, message_id: i64, action: PendingAction) {
-        let (nonce, label) = self.add_pending_confirmation(action);
-        let _ = self.client.edit_menu(
-            chat_id,
-            message_id,
-            format!("Confirm {label}?"),
-            confirmation_keyboard(&nonce),
-        );
+        let text = self.confirmation_text(&action);
+        let nonce = self.add_pending_confirmation(action);
+        let _ = self
+            .client
+            .edit_menu(chat_id, message_id, text, confirmation_keyboard(&nonce));
     }
 
     fn send_confirmation(&mut self, chat_id: i64, action: PendingAction) {
-        let (nonce, label) = self.add_pending_confirmation(action);
-        let _ = self.client.send_menu(
-            chat_id,
-            format!("Confirm {label}?"),
-            confirmation_keyboard(&nonce),
-        );
+        let text = self.confirmation_text(&action);
+        let nonce = self.add_pending_confirmation(action);
+        let _ = self
+            .client
+            .send_menu(chat_id, text, confirmation_keyboard(&nonce));
     }
 
-    fn add_pending_confirmation(&mut self, action: PendingAction) -> (String, String) {
+    fn confirmation_text(&self, action: &PendingAction) -> String {
+        match action {
+            PendingAction::DeployLatestRelease => build_deploy_confirmation_text(self.app.clone()),
+            _ => format!("Confirm {}?", action.label()),
+        }
+    }
+
+    fn add_pending_confirmation(&mut self, action: PendingAction) -> String {
         let nonce = create_nonce();
-        let label = action.label();
         self.pending.insert(
             nonce.clone(),
             PendingConfirmation {
@@ -565,7 +583,7 @@ impl BotRunner {
                 expires_at: Instant::now() + Duration::from_secs(CONFIRMATION_TTL_SECS),
             },
         );
-        (nonce, label)
+        nonce
     }
 
     fn run_confirmed_action(&mut self, chat_id: i64, message_id: i64, nonce: &str) {
@@ -594,6 +612,7 @@ impl BotRunner {
             .send_message(chat_id, pending.action.started_message());
         match pending.action {
             PendingAction::DeployLatestRelease => self.run_deploy_latest(chat_id),
+            PendingAction::RunMigration => self.run_migration(chat_id),
             PendingAction::RestartPm2(app_name) => self.run_pm2_restart(chat_id, app_name),
         }
     }
@@ -630,20 +649,51 @@ impl BotRunner {
     }
 
     fn run_deploy_latest(&self, chat_id: i64) {
-        let result = load_settings(&self.app)
-            .and_then(|settings| deploy_portal_release_blocking(self.app.clone(), settings));
+        let client = self.client.clone();
+        let result = with_deploy_progress_listener(
+            move |event| {
+                if should_send_deploy_progress(event) {
+                    let _ = client.send_message(chat_id, deploy_progress_text(event));
+                }
+            },
+            || {
+                load_settings(&self.app)
+                    .and_then(|settings| deploy_portal_release_blocking(self.app.clone(), settings))
+            },
+        );
 
+        match result {
+            Ok(result) => {
+                let _ = self.client.send_menu(
+                    chat_id,
+                    format!(
+                        "Portal release deployed.\nDeployment: {}\nRelease: {}\nPM2: {}",
+                        result.deployment.id,
+                        result
+                            .deployment
+                            .release_tag
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        result.pm2.message
+                    ),
+                    migration_keyboard(),
+                );
+            }
+            Err(err) => {
+                let _ = self
+                    .client
+                    .send_message(chat_id, format!("Portal release deploy failed: {err}"));
+            }
+        }
+    }
+
+    fn run_migration(&self, chat_id: i64) {
+        let result = run_migration_blocking(self.app.clone());
         let text = match result {
-            Ok(result) => format!(
-                "Portal release deployed.\nDeployment: {}\nRelease: {}\nPM2: {}",
-                result.deployment.id,
-                result
-                    .deployment
-                    .release_tag
-                    .unwrap_or_else(|| "unknown".to_string()),
-                result.pm2.message
-            ),
-            Err(err) => format!("Portal release deploy failed: {err}"),
+            Ok(result) if result.success => {
+                format!("Database migration completed. {}", result.message)
+            }
+            Ok(result) => format!("Database migration failed: {}", result.message),
+            Err(err) => format!("Database migration failed: {err}"),
         };
         let _ = self.client.send_message(chat_id, text);
     }
@@ -736,6 +786,53 @@ fn build_status_text(app: AppHandle) -> Result<String, String> {
     ))
 }
 
+fn build_deploy_confirmation_text(app: AppHandle) -> String {
+    let result =
+        load_settings(&app).and_then(|settings| check_portal_release_blocking(app, settings));
+
+    match result {
+        Ok(check) => {
+            let Some(latest) = check.latest else {
+                return format!(
+                    "Confirm deploy the latest Portal release?\n\nGitHub release check returned no release.\n{}",
+                    check.message
+                );
+            };
+
+            let active = check
+                .active_release_tag
+                .unwrap_or_else(|| "none".to_string());
+            let status = if check.update_available {
+                "Update available"
+            } else {
+                "Already active"
+            };
+            let name = latest
+                .release_name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| latest.tag_name.clone());
+            let digest = latest
+                .asset_digest
+                .map(|digest| format!("\nDigest: {digest}"))
+                .unwrap_or_default();
+
+            format!(
+                "Confirm deploy the latest Portal release?\n\nVersion: {}\nName: {}\nAsset: {}\nSize: {}\nActive: {}\nStatus: {}{}",
+                latest.tag_name,
+                name,
+                latest.asset_name,
+                format_bytes(latest.asset_size),
+                active,
+                status,
+                digest
+            )
+        }
+        Err(err) => format!(
+            "Confirm deploy the latest Portal release?\n\nGitHub release check failed: {err}"
+        ),
+    }
+}
+
 fn record_last_seen_ids(app: &AppHandle, user_id: i64, chat_id: i64) -> Result<(), String> {
     let mut settings = load_settings(app)?;
     settings.telegram_bot.last_user_id = user_id.to_string();
@@ -749,7 +846,7 @@ fn main_menu_text() -> &'static str {
 }
 
 fn command_help_text() -> &'static str {
-    "EduClassControl commands\n/menu - Show control menu\n/status - Show app status\n/backup - Run database backup\n/logs - Choose a log target\n/pm2 - Choose a PM2 restart target\n/deploy - Confirm latest Portal deploy\n/help - Show commands"
+    "EduClassControl commands\n/menu - Show control menu\n/status - Show app status\n/backup - Run database backup\n/migration - Run database migration\n/logs - Choose a log target\n/pm2 - Choose a PM2 restart target\n/deploy - Confirm latest Portal deploy\n/help - Show commands"
 }
 
 fn main_menu_keyboard() -> Value {
@@ -758,12 +855,17 @@ fn main_menu_keyboard() -> Value {
             button("Status", ACTION_STATUS),
             button("Backup DB", ACTION_BACKUP_DB),
         ],
+        vec![button("Migration", ACTION_MIGRATION)],
         vec![button("Deploy latest Portal", ACTION_DEPLOY_LATEST)],
         vec![
             button("Logs", ACTION_LOGS_MENU),
             button("PM2 restart", ACTION_PM2_MENU),
         ],
     ])
+}
+
+fn migration_keyboard() -> Value {
+    keyboard(vec![vec![button("Migration", ACTION_MIGRATION)]])
 }
 
 fn logs_menu_keyboard() -> Value {
@@ -819,6 +921,45 @@ fn is_command(text: &str, command: &str) -> bool {
         return false;
     };
     first == format!("/{command}") || first.starts_with(&format!("/{command}@"))
+}
+
+fn should_send_deploy_progress(event: &DeployProgressEvent) -> bool {
+    matches!(event.state.as_str(), "running" | "failed")
+}
+
+fn deploy_progress_text(event: &DeployProgressEvent) -> String {
+    let state = match event.state.as_str() {
+        "running" => "running",
+        "failed" => "failed",
+        "done" => "done",
+        "skipped" => "skipped",
+        _ => event.state.as_str(),
+    };
+    format!(
+        "Deploy step {state}: {}\n{}",
+        event.label,
+        event.detail.trim()
+    )
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes == 0 {
+        return "unknown".to_string();
+    }
+
+    let units = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0;
+    while value >= 1024.0 && unit_index < units.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{} {}", bytes, units[unit_index])
+    } else {
+        format!("{value:.1} {}", units[unit_index])
+    }
 }
 
 fn clamp_message(text: String) -> String {
@@ -881,7 +1022,31 @@ mod tests {
         assert!(is_command("/menu", "menu"));
         assert!(is_command("/status@EduClass_Control_bot", "status"));
         assert!(is_command("/deploy latest", "deploy"));
+        assert!(is_command("/migration", "migration"));
         assert!(!is_command("/deployment", "deploy"));
+    }
+
+    #[test]
+    fn formats_release_asset_size() {
+        assert_eq!(format_bytes(0), "unknown");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1_572_864), "1.5 MB");
+    }
+
+    #[test]
+    fn formats_deploy_progress_step_message() {
+        let event = DeployProgressEvent {
+            step_id: "pm2".to_string(),
+            label: "Reload PM2".to_string(),
+            state: "running".to_string(),
+            detail: "Running pm2 startOrReload.".to_string(),
+        };
+
+        assert!(should_send_deploy_progress(&event));
+        assert_eq!(
+            deploy_progress_text(&event),
+            "Deploy step running: Reload PM2\nRunning pm2 startOrReload."
+        );
     }
 
     #[test]

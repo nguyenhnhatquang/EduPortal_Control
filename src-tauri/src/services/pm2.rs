@@ -2,7 +2,10 @@ use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    net::{Ipv4Addr, SocketAddrV4, TcpListener},
     path::{Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -217,10 +220,11 @@ pub(crate) fn run_pm2_config(config_path: &Path) -> Pm2CommandResult {
 }
 
 pub(crate) fn run_pm2_config_with_recovery(
+    settings: &Settings,
     config_path: &Path,
     deployment_path: &str,
 ) -> Pm2CommandResult {
-    let result = run_pm2_config(config_path);
+    let result = run_pm2_config_after_recreate(settings, config_path);
     if !result.attempted || result.skipped || !result.success {
         return result;
     }
@@ -247,6 +251,17 @@ pub(crate) fn run_pm2_config_with_recovery(
                 return combined;
             }
 
+            let wait_result = wait_for_web_api_ports(settings);
+            combined = combine_pm2_results(
+                combined,
+                wait_result.clone(),
+                wait_result.success,
+                wait_result.message,
+            );
+            if !wait_result.success {
+                return combined;
+            }
+
             let retry = run_pm2_config(config_path);
             combined = combine_pm2_results(combined, retry.clone(), retry.success, retry.message);
             if !retry.success || retry.skipped || !retry.attempted {
@@ -269,6 +284,38 @@ pub(crate) fn run_pm2_config_with_recovery(
             }
         }
     }
+}
+
+fn run_pm2_config_after_recreate(settings: &Settings, config_path: &Path) -> Pm2CommandResult {
+    let delete_result = run_pm2_delete_managed_apps();
+    if delete_result.attempted && !delete_result.success {
+        return delete_result;
+    }
+
+    let wait_result = wait_for_web_api_ports(settings);
+    let mut combined = combine_pm2_results(
+        delete_result.clone(),
+        wait_result.clone(),
+        wait_result.success,
+        if wait_result.skipped {
+            delete_result.message
+        } else {
+            wait_result.message
+        },
+    );
+    if !wait_result.success {
+        return combined;
+    }
+
+    let start_result = run_pm2_config(config_path);
+    combined = combine_pm2_results(
+        combined,
+        start_result.clone(),
+        start_result.success,
+        start_result.message,
+    );
+
+    combined
 }
 
 fn verify_pm2_deployment_path(deployment_path: &str) -> Result<(), String> {
@@ -406,6 +453,116 @@ fn run_pm2_delete_managed_apps() -> Pm2CommandResult {
             message: format!("Failed to delete PM2 managed apps: {err}"),
         },
     }
+}
+
+fn wait_for_web_api_ports(settings: &Settings) -> Pm2CommandResult {
+    let ports = web_api_ports(settings);
+    let command_label = if ports.is_empty() {
+        "wait for WebApi ports".to_string()
+    } else {
+        format!(
+            "wait for WebApi port(s) {}",
+            ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    if !pm2_execution_enabled() {
+        return Pm2CommandResult {
+            attempted: false,
+            skipped: true,
+            success: true,
+            command: command_label,
+            stdout: String::new(),
+            stderr: String::new(),
+            message: "PM2 execution is skipped outside Windows. Set EDUPORTAL_CONTROL_RUN_PM2=1 to force it."
+                .to_string(),
+        };
+    }
+
+    if ports.is_empty() {
+        return Pm2CommandResult {
+            attempted: false,
+            skipped: true,
+            success: true,
+            command: command_label,
+            stdout: String::new(),
+            stderr: String::new(),
+            message: "No WebApi port wait is configured.".to_string(),
+        };
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        if ports.iter().all(|port| tcp_port_available(*port)) {
+            return Pm2CommandResult {
+                attempted: true,
+                skipped: false,
+                success: true,
+                command: command_label,
+                stdout: String::new(),
+                stderr: String::new(),
+                message: format!(
+                    "WebApi port(s) {} released.",
+                    ports
+                        .iter()
+                        .map(u16::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    Pm2CommandResult {
+        attempted: true,
+        skipped: false,
+        success: false,
+        command: command_label,
+        stdout: String::new(),
+        stderr: String::new(),
+        message: format!(
+            "Timed out waiting for WebApi port(s) {} to be released after PM2 delete.",
+            ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn web_api_ports(settings: &Settings) -> Vec<u16> {
+    settings
+        .web_api_env
+        .get("ASPNETCORE_URLS")
+        .map(|urls| {
+            urls.split(';')
+                .filter_map(extract_url_port)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn extract_url_port(raw: &str) -> Option<u16> {
+    let value = raw.trim().trim_matches('"').trim_matches('\'');
+    let colon = value.rfind(':')?;
+    let digits = value[colon + 1..]
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>();
+    digits.parse().ok()
+}
+
+fn tcp_port_available(port: u16) -> bool {
+    let ipv4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
+    TcpListener::bind(ipv4).is_ok()
 }
 
 fn combine_pm2_results(
@@ -559,4 +716,21 @@ pub(crate) fn parse_pm2_processes(json: &str) -> Result<Vec<Pm2Process>, String>
     }
 
     Ok(processes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::default_settings;
+
+    #[test]
+    fn parses_web_api_ports_from_aspnetcore_urls() {
+        let mut settings = default_settings();
+        settings.web_api_env.insert(
+            "ASPNETCORE_URLS".to_string(),
+            "http://localhost:7000;https://+:7001;http://[::]:7002".to_string(),
+        );
+
+        assert_eq!(web_api_ports(&settings), vec![7000, 7001, 7002]);
+    }
 }

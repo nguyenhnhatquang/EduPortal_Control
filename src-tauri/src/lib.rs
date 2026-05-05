@@ -7,11 +7,13 @@ mod telegram;
 
 use chrono::{DateTime, Local};
 use std::{
+    cell::RefCell,
     collections::BTreeSet,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, MutexGuard, OnceLock},
 };
 use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager};
 use zip::ZipArchive;
@@ -20,6 +22,42 @@ use crate::domain::*;
 use crate::runtime::*;
 use crate::services::migration::*;
 use crate::storage::*;
+
+static DEPLOYMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+type DeployProgressListener = Box<dyn Fn(&DeployProgressEvent)>;
+
+thread_local! {
+    static DEPLOY_PROGRESS_LISTENER: RefCell<Option<DeployProgressListener>> = RefCell::new(None);
+}
+
+struct DeployProgressListenerGuard;
+
+impl Drop for DeployProgressListenerGuard {
+    fn drop(&mut self) {
+        DEPLOY_PROGRESS_LISTENER.with(|listener| {
+            listener.borrow_mut().take();
+        });
+    }
+}
+
+fn deployment_guard() -> Result<MutexGuard<'static, ()>, String> {
+    DEPLOYMENT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "Another deployment task panicked while holding the deploy lock.".to_string())
+}
+
+pub(crate) fn with_deploy_progress_listener<T>(
+    listener: impl Fn(&DeployProgressEvent) + 'static,
+    task: impl FnOnce() -> T,
+) -> T {
+    DEPLOY_PROGRESS_LISTENER.with(|current| {
+        *current.borrow_mut() = Some(Box::new(listener));
+    });
+    let _guard = DeployProgressListenerGuard;
+    task()
+}
 
 pub(crate) fn get_system_status_blocking(app: AppHandle) -> Result<SystemStatus, String> {
     let settings = load_settings(&app)?;
@@ -186,6 +224,7 @@ pub(crate) fn deploy_package_blocking(
     zip_path: String,
     settings: Settings,
 ) -> Result<DeployResult, String> {
+    let _guard = deployment_guard()?;
     let settings = save_settings(&app, settings)?;
     deploy_package_with_metadata(app, zip_path, settings, DeploymentSourceMetadata::default())
 }
@@ -213,6 +252,7 @@ pub(crate) fn deploy_portal_release_blocking(
     app: AppHandle,
     settings: Settings,
 ) -> Result<DeployResult, String> {
+    let _guard = deployment_guard()?;
     let settings = save_settings(&app, settings)?;
     emit_deploy_progress(
         &app,
@@ -415,7 +455,8 @@ fn deploy_package_with_metadata(
         "running",
         "Running pm2 startOrReload.",
     );
-    let pm2 = services::pm2::run_pm2_config_with_recovery(&config_path, &deployment_path);
+    let pm2 =
+        services::pm2::run_pm2_config_with_recovery(&settings, &config_path, &deployment_path);
     if pm2.attempted && !pm2.success {
         emit_deploy_progress(&app, "pm2", "Reload PM2", "failed", &pm2.message);
         return Err(format!("PM2 reload failed: {}", pm2.message));
@@ -480,6 +521,8 @@ pub(crate) fn rollback_deployment_blocking(
     app: AppHandle,
     deployment_id: String,
 ) -> Result<RollbackResult, String> {
+    let _guard = deployment_guard()?;
+    let settings = load_settings(&app)?;
     let mut state = load_state(&app)?;
     let deployment = state
         .deployments
@@ -496,6 +539,7 @@ pub(crate) fn rollback_deployment_blocking(
     }
 
     let pm2 = services::pm2::run_pm2_config_with_recovery(
+        &settings,
         Path::new(&deployment.config_path),
         &deployment.deployment_path,
     );
@@ -586,18 +630,42 @@ fn normalize_zip_entry(entry: &str) -> String {
 }
 
 fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), String> {
+    extract_zip_entries(zip_path, destination, false)
+}
+
+fn extract_zip_entries(
+    zip_path: &Path,
+    destination: &Path,
+    strip_single_root: bool,
+) -> Result<(), String> {
     let file = File::open(zip_path)
         .map_err(|err| format!("Failed to open zip package {}: {err}", zip_path.display()))?;
     let mut archive = ZipArchive::new(file)
         .map_err(|err| format!("Failed to read zip package {}: {err}", zip_path.display()))?;
+    let strip_root = if strip_single_root {
+        archive_single_root(&mut archive)?
+    } else {
+        None
+    };
 
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
             .map_err(|err| format!("Failed to read zip entry #{index}: {err}"))?;
-        let Some(enclosed_name) = entry.enclosed_name().map(PathBuf::from) else {
+        let Some(mut enclosed_name) = entry.enclosed_name().map(PathBuf::from) else {
             continue;
         };
+
+        if let Some(root) = &strip_root {
+            enclosed_name = enclosed_name
+                .strip_prefix(root)
+                .map(Path::to_path_buf)
+                .unwrap_or(enclosed_name);
+            if enclosed_name.as_os_str().is_empty() {
+                continue;
+            }
+        }
+
         let out_path = destination.join(enclosed_name);
 
         if entry.is_dir() {
@@ -622,6 +690,36 @@ fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn archive_single_root(archive: &mut ZipArchive<File>) -> Result<Option<PathBuf>, String> {
+    let mut root = None;
+
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|err| format!("Failed to inspect zip entry #{index}: {err}"))?;
+        let Some(enclosed_name) = entry.enclosed_name().map(PathBuf::from) else {
+            continue;
+        };
+        let mut components = enclosed_name.components();
+        let Some(first) = components.next() else {
+            continue;
+        };
+        let first = PathBuf::from(first.as_os_str());
+
+        if components.next().is_none() && !entry.is_dir() {
+            return Ok(None);
+        }
+
+        match &root {
+            Some(existing) if existing == &first => {}
+            Some(_) => return Ok(None),
+            None => root = Some(first),
+        }
+    }
+
+    Ok(root)
 }
 
 fn run_post_deploy_steps(
@@ -669,14 +767,14 @@ fn run_post_deploy_steps(
     emit_deploy_progress(
         app,
         "asset",
-        "Copy Portal assets",
+        "Install Portal assets",
         if settings.portal_asset_copy.enabled {
             "running"
         } else {
             "skipped"
         },
         if settings.portal_asset_copy.enabled {
-            "Copying configured Portal asset folder."
+            "Copying or extracting configured Portal assets."
         } else {
             "Portal asset copy is disabled."
         },
@@ -687,14 +785,14 @@ fn run_post_deploy_steps(
             emit_deploy_progress(
                 app,
                 "asset",
-                "Copy Portal assets",
+                "Install Portal assets",
                 if result.skipped { "skipped" } else { "done" },
                 &result.message,
             );
             results.push(result);
         }
         Err(err) => {
-            emit_deploy_progress(app, "asset", "Copy Portal assets", "failed", &err);
+            emit_deploy_progress(app, "asset", "Install Portal assets", "failed", &err);
             return Err(err);
         }
     }
@@ -703,15 +801,20 @@ fn run_post_deploy_steps(
 }
 
 fn emit_deploy_progress(app: &AppHandle, step_id: &str, label: &str, state: &str, detail: &str) {
-    let _ = app.emit(
-        "deploy-progress",
-        DeployProgressEvent {
-            step_id: step_id.to_string(),
-            label: label.to_string(),
-            state: state.to_string(),
-            detail: detail.to_string(),
-        },
-    );
+    let event = DeployProgressEvent {
+        step_id: step_id.to_string(),
+        label: label.to_string(),
+        state: state.to_string(),
+        detail: detail.to_string(),
+    };
+
+    DEPLOY_PROGRESS_LISTENER.with(|listener| {
+        if let Some(listener) = listener.borrow().as_ref() {
+            listener(&event);
+        }
+    });
+
+    let _ = app.emit("deploy-progress", event);
 }
 
 fn run_portal_dependency_install(
@@ -797,28 +900,53 @@ fn run_portal_asset_copy(
 
     let source = resolve_asset_source(settings);
     let destination = portal_dir.join(&config.destination);
-    if !source.is_dir() {
+    if source.is_dir() {
+        copy_dir_recursive(&source, &destination)?;
+
+        return Ok(PostDeployStepResult {
+            name: "Portal asset copy".to_string(),
+            success: true,
+            skipped: false,
+            message: format!(
+                "Copied {} to {}.",
+                display_path(&source),
+                display_path(&destination)
+            ),
+            command: None,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+    }
+
+    if source.is_file() && is_zip_file(&source) {
+        extract_asset_zip(&source, &destination)?;
+
+        return Ok(PostDeployStepResult {
+            name: "Portal asset copy".to_string(),
+            success: true,
+            skipped: false,
+            message: format!(
+                "Extracted {} to {}.",
+                display_path(&source),
+                display_path(&destination)
+            ),
+            command: None,
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+    }
+
+    if source.is_file() {
         return Err(format!(
-            "Portal asset copy is enabled but source folder was not found: {}",
+            "Portal asset copy is enabled but source is not a .zip file: {}",
             source.display()
         ));
     }
 
-    copy_dir_recursive(&source, &destination)?;
-
-    Ok(PostDeployStepResult {
-        name: "Portal asset copy".to_string(),
-        success: true,
-        skipped: false,
-        message: format!(
-            "Copied {} to {}.",
-            display_path(&source),
-            display_path(&destination)
-        ),
-        command: None,
-        stdout: String::new(),
-        stderr: String::new(),
-    })
+    Err(format!(
+        "Portal asset copy is enabled but source folder or .zip file was not found: {}",
+        source.display()
+    ))
 }
 
 fn resolve_asset_source(settings: &Settings) -> PathBuf {
@@ -828,6 +956,31 @@ fn resolve_asset_source(settings: &Settings) -> PathBuf {
     } else {
         PathBuf::from(&settings.deploy_root).join(configured)
     }
+}
+
+fn is_zip_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+}
+
+fn extract_asset_zip(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        fs::remove_dir_all(destination).map_err(|err| {
+            format!(
+                "Failed to clear destination directory {}: {err}",
+                destination.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(destination).map_err(|err| {
+        format!(
+            "Failed to create destination directory {}: {err}",
+            destination.display()
+        )
+    })?;
+
+    extract_zip_entries(source, destination, true)
 }
 
 fn list_postgres_backups(settings: &Settings) -> Result<DatabaseBackupListing, String> {

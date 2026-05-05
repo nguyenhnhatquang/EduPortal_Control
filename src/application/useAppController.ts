@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   applyCaddyConfig,
   applyCaddyPublishTestConfig,
@@ -281,34 +282,49 @@ export function useAppController() {
     if (selected) {
       setPackagePath(selected);
       setValidation(null);
+      setDeploySteps(createDeploySteps(settings));
     }
-  }, []);
+  }, [settings]);
+
+  const handleSetPackagePath = useCallback(
+    (value: string) => {
+      setPackagePath(value);
+      setValidation(null);
+      setDeploySteps(createDeploySteps(settings));
+    },
+    [settings],
+  );
 
   const handleValidatePackage = useCallback(async () => {
     if (!packagePath.trim()) return;
-    setBusy("validate");
-    setError(null);
-    setNotice(null);
+    flushSync(() => {
+      setDeploySteps(markDeployStep(createDeploySteps(settings), "validate", "running"));
+      setBusy("validate");
+      setError(null);
+      setNotice(null);
+    });
     try {
-      setDeploySteps(markDeployStep(createDeploySteps(), "validate", "running"));
       const result = await validatePackage(packagePath.trim());
       setValidation(result);
-      setDeploySteps(markDeployStep(createDeploySteps(), "validate", result.valid ? "done" : "failed"));
+      setDeploySteps(markDeployStep(createDeploySteps(settings), "validate", result.valid ? "done" : "failed"));
       setNotice(result.valid ? "Package is valid." : "Package is missing required files.");
     } catch (err) {
+      setDeploySteps((steps) => failActiveDeployStep(steps));
       setError(errorMessage(err));
     } finally {
       setBusy(null);
     }
-  }, [packagePath]);
+  }, [packagePath, settings]);
 
   const handleDeploy = useCallback(async () => {
     if (!packagePath.trim()) return;
     const runningSteps = createDeploySteps(settings);
-    setDeploySteps(markDeployStep(runningSteps, "validate", "running"));
-    setBusy("deploy");
-    setError(null);
-    setNotice(null);
+    flushSync(() => {
+      setDeploySteps(markDeployStep(runningSteps, "validate", "running"));
+      setBusy("deploy");
+      setError(null);
+      setNotice(null);
+    });
     try {
       const result = await deployPackage(packagePath.trim(), settings);
       const postDeploySummary = result.postDeploy
@@ -352,10 +368,12 @@ export function useAppController() {
     if (!confirmed) return;
 
     const runningSteps = createPortalReleaseDeploySteps(settings);
-    setDeploySteps(runningSteps);
-    setBusy("portal-release-deploy");
-    setError(null);
-    setNotice(null);
+    flushSync(() => {
+      setDeploySteps(markDeployStep(runningSteps, "download", "running"));
+      setBusy("portal-release-deploy");
+      setError(null);
+      setNotice(null);
+    });
     try {
       const result = await deployPortalRelease(settings);
       const postDeploySummary = result.postDeploy
@@ -794,7 +812,7 @@ export function useAppController() {
     setDatabaseRestorePath,
     setLogApp,
     setLogLines,
-    setPackagePath,
+    setPackagePath: handleSetPackagePath,
     setSettings,
   };
 }
