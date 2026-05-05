@@ -52,6 +52,15 @@ export interface PortalReleaseSettings {
   assetNameSuffix: string;
 }
 
+export interface TelegramBotSettings {
+  enabled: boolean;
+  token: string;
+  allowedUserIds: string;
+  allowedChatIds: string;
+  lastUserId: string;
+  lastChatId: string;
+}
+
 export interface Settings {
   deployRoot: string;
   retention: number;
@@ -65,6 +74,7 @@ export interface Settings {
   database: DatabaseSettings;
   caddy: CaddySettings;
   portalRelease: PortalReleaseSettings;
+  telegramBot: TelegramBotSettings;
 }
 
 export interface DeploymentRecord {

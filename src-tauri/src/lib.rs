@@ -3,6 +3,7 @@ mod domain;
 mod runtime;
 mod services;
 mod storage;
+mod telegram;
 
 use chrono::{DateTime, Local};
 use std::{
@@ -1426,6 +1427,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            telegram::start(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
@@ -1489,6 +1494,25 @@ mod tests {
             "EduPortal_DiemSensei_"
         );
         assert_eq!(settings.portal_release.asset_name_suffix, ".zip");
+    }
+
+    #[test]
+    fn settings_without_telegram_bot_gets_defaults() {
+        let mut value = serde_json::to_value(default_settings()).expect("settings json");
+        value
+            .as_object_mut()
+            .expect("settings object")
+            .remove("telegramBot");
+
+        let settings: Settings = serde_json::from_value(value).expect("deserialize settings");
+        let settings = sanitize_settings(settings);
+
+        assert!(!settings.telegram_bot.enabled);
+        assert!(settings.telegram_bot.token.is_empty());
+        assert!(settings.telegram_bot.allowed_user_ids.is_empty());
+        assert!(settings.telegram_bot.allowed_chat_ids.is_empty());
+        assert!(settings.telegram_bot.last_user_id.is_empty());
+        assert!(settings.telegram_bot.last_chat_id.is_empty());
     }
 
     #[test]

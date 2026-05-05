@@ -34,6 +34,8 @@ pub struct Settings {
     pub caddy: CaddySettings,
     #[serde(default = "default_portal_release_settings")]
     pub portal_release: PortalReleaseSettings,
+    #[serde(default = "default_telegram_bot_settings")]
+    pub telegram_bot: TelegramBotSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +113,23 @@ pub struct PortalReleaseSettings {
     pub asset_name_prefix: String,
     #[serde(default = "default_portal_release_asset_suffix")]
     pub asset_name_suffix: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramBotSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub allowed_user_ids: String,
+    #[serde(default)]
+    pub allowed_chat_ids: String,
+    #[serde(default)]
+    pub last_user_id: String,
+    #[serde(default)]
+    pub last_chat_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -389,6 +408,7 @@ pub(crate) fn default_settings() -> Settings {
         database: default_database_settings(),
         caddy: default_caddy_settings(),
         portal_release: default_portal_release_settings(),
+        telegram_bot: default_telegram_bot_settings(),
     }
 }
 
@@ -541,6 +561,17 @@ fn default_portal_release_settings() -> PortalReleaseSettings {
     }
 }
 
+fn default_telegram_bot_settings() -> TelegramBotSettings {
+    TelegramBotSettings {
+        enabled: false,
+        token: String::new(),
+        allowed_user_ids: String::new(),
+        allowed_chat_ids: String::new(),
+        last_user_id: String::new(),
+        last_chat_id: String::new(),
+    }
+}
+
 fn default_deploy_root() -> String {
     if cfg!(windows) {
         "C:\\deploy".to_string()
@@ -601,7 +632,17 @@ pub(crate) fn sanitize_settings(mut settings: Settings) -> Settings {
     settings.database = sanitize_database_settings(settings.database);
     settings.caddy = sanitize_caddy_settings(settings.caddy);
     settings.portal_release = sanitize_portal_release_settings(settings.portal_release);
+    settings.telegram_bot = sanitize_telegram_bot_settings(settings.telegram_bot);
     settings
+}
+
+fn sanitize_telegram_bot_settings(mut telegram_bot: TelegramBotSettings) -> TelegramBotSettings {
+    telegram_bot.token = telegram_bot.token.trim().to_string();
+    telegram_bot.allowed_user_ids = telegram_bot.allowed_user_ids.trim().to_string();
+    telegram_bot.allowed_chat_ids = telegram_bot.allowed_chat_ids.trim().to_string();
+    telegram_bot.last_user_id = telegram_bot.last_user_id.trim().to_string();
+    telegram_bot.last_chat_id = telegram_bot.last_chat_id.trim().to_string();
+    telegram_bot
 }
 
 fn sanitize_caddy_settings(mut caddy: CaddySettings) -> CaddySettings {

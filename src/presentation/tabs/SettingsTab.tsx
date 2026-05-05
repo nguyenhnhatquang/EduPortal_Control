@@ -1,4 +1,4 @@
-import { Database, FolderOpen, Loader2, Save, Settings as SettingsIcon, Terminal } from "lucide-react";
+import { Bot, Database, FolderOpen, Loader2, Save, Settings as SettingsIcon, Terminal } from "lucide-react";
 import { EnvEditor } from "../components/EnvEditor";
 import type { Settings } from "../../types";
 
@@ -12,6 +12,7 @@ interface SettingsTabProps {
 
 export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, onSave }: SettingsTabProps) {
   const database = settings.database;
+  const telegramBot = settings.telegramBot;
 
   function updateDatabase(next: Partial<typeof database>) {
     setSettings({
@@ -38,6 +39,16 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
       ...settings,
       portalRelease: {
         ...settings.portalRelease,
+        ...next,
+      },
+    });
+  }
+
+  function updateTelegramBot(next: Partial<typeof settings.telegramBot>) {
+    setSettings({
+      ...settings,
+      telegramBot: {
+        ...settings.telegramBot,
         ...next,
       },
     });
@@ -72,6 +83,10 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
         <div className="settings-summary-item">
           <span>PostgreSQL target</span>
           <strong>{database.host}:{database.port}/{database.database}</strong>
+        </div>
+        <div className="settings-summary-item">
+          <span>Telegram bot</span>
+          <strong>{telegramBot.enabled ? "Enabled" : "Disabled"}</strong>
         </div>
       </div>
 
@@ -204,6 +219,66 @@ export function SettingsTab({ settings, setSettings, busy, onBrowseBackupDir, on
                   value={settings.portalRelease.assetNameSuffix}
                   onChange={(event) => updatePortalRelease({ assetNameSuffix: event.target.value })}
                 />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Remote Admin</h2>
+            <span>Telegram bot access for controlled VPS operations</span>
+          </div>
+          <Bot size={20} />
+        </div>
+
+        <div className="settings-section-stack">
+          <div className="settings-section">
+            <div className="settings-section-title">
+              <strong>Telegram bot</strong>
+              <span>Uses numeric Telegram IDs for the bot allowlist.</span>
+            </div>
+
+            <div className="release-settings-grid">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={telegramBot.enabled}
+                  onChange={(event) => updateTelegramBot({ enabled: event.target.checked })}
+                />
+                <span>Enable Telegram bot</span>
+              </label>
+              <label className="span-2">
+                <span>Bot token</span>
+                <input
+                  type="password"
+                  value={telegramBot.token}
+                  onChange={(event) => updateTelegramBot({ token: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Allowed user IDs</span>
+                <input
+                  value={telegramBot.allowedUserIds}
+                  onChange={(event) => updateTelegramBot({ allowedUserIds: event.target.value })}
+                />
+              </label>
+              <label className="span-2">
+                <span>Allowed chat IDs</span>
+                <input
+                  value={telegramBot.allowedChatIds}
+                  onChange={(event) => updateTelegramBot({ allowedChatIds: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Last user ID</span>
+                <input value={telegramBot.lastUserId} readOnly />
+              </label>
+              <label>
+                <span>Last chat ID</span>
+                <input value={telegramBot.lastChatId} readOnly />
               </label>
             </div>
           </div>

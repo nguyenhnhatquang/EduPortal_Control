@@ -88,6 +88,14 @@ const mockSettings: Settings = {
     assetNamePrefix: "EduPortal_DiemSensei_",
     assetNameSuffix: ".zip",
   },
+  telegramBot: {
+    enabled: false,
+    token: "",
+    allowedUserIds: "",
+    allowedChatIds: "",
+    lastUserId: "",
+    lastChatId: "",
+  },
 };
 
 const mockDeploymentState: DeploymentState = {

@@ -30,6 +30,10 @@ Run the desktop app in development:
 npm run tauri dev
 ```
 
+## Telegram Bot
+
+The optional Telegram admin bot is configured from the app Settings screen. Send `/start` to the bot to discover the numeric Telegram IDs, and keep bot tokens in local runtime settings only.
+
 Build a local compile check without bundling an installer:
 
 ```bash

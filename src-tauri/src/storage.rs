@@ -37,10 +37,34 @@ pub(crate) fn load_settings(app: &AppHandle) -> Result<Settings, String> {
 }
 
 pub(crate) fn save_settings(app: &AppHandle, settings: Settings) -> Result<Settings, String> {
-    let settings = sanitize_settings(settings);
     let path = config_dir(app)?.join(SETTINGS_FILE);
+    let mut settings = sanitize_settings(settings);
+    preserve_discovered_telegram_ids(&path, &mut settings);
     write_json(&path, &settings)?;
     Ok(settings)
+}
+
+fn preserve_discovered_telegram_ids(path: &Path, settings: &mut Settings) {
+    if !settings.telegram_bot.last_user_id.is_empty()
+        && !settings.telegram_bot.last_chat_id.is_empty()
+    {
+        return;
+    }
+
+    let Ok(contents) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(existing) = serde_json::from_str::<Settings>(&contents) else {
+        return;
+    };
+    let existing = sanitize_settings(existing);
+
+    if settings.telegram_bot.last_user_id.is_empty() {
+        settings.telegram_bot.last_user_id = existing.telegram_bot.last_user_id;
+    }
+    if settings.telegram_bot.last_chat_id.is_empty() {
+        settings.telegram_bot.last_chat_id = existing.telegram_bot.last_chat_id;
+    }
 }
 
 pub(crate) fn load_state(app: &AppHandle) -> Result<DeploymentState, String> {
