@@ -44,6 +44,10 @@ npm run tauri build -- --no-bundle
 
 Windows releases are built by GitHub Actions when a version tag is pushed.
 
+| Version | Date | Release notes |
+| --- | --- | --- |
+| v0.2.8 | 2026-05-05 | Improves Telegram remote administration: the bot now refreshes allowlist settings without replaying a pending update, preventing the confusing `Unauthorized Telegram user.` plus status double-response after saving IDs. Adds `/menu`, `/help`, `/backup`, `/logs`, `/pm2`, and `/deploy` slash commands alongside `/start` and `/status`; `/deploy` still requires Confirm/Cancel and `/pm2` opens the restart target menu for safer operations. Verified with frontend build, npm audit, Rust format/test, and a Tauri release compile check without bundling. |
+
 Before tagging, bump the app version in:
 
 - `package.json`

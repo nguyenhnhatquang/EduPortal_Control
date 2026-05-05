@@ -80,6 +80,10 @@ impl BotConfig {
             self.allowed_chat_ids.contains(&chat_id)
         }
     }
+
+    fn uses_same_token(&self, other: &Self) -> bool {
+        self.token == other.token
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,7 +193,13 @@ impl TelegramClient {
             json!({
                 "commands": [
                     { "command": "start", "description": "Open control panel" },
-                    { "command": "status", "description": "Show app status" }
+                    { "command": "menu", "description": "Show control menu" },
+                    { "command": "status", "description": "Show app status" },
+                    { "command": "backup", "description": "Run database backup" },
+                    { "command": "logs", "description": "Choose a log target" },
+                    { "command": "pm2", "description": "Choose a PM2 restart target" },
+                    { "command": "deploy", "description": "Deploy latest Portal release" },
+                    { "command": "help", "description": "Show commands" }
                 ]
             }),
         )?;
@@ -312,13 +322,16 @@ impl BotRunner {
         let _ = self.client.set_my_commands();
 
         loop {
-            match BotConfig::load(&self.app) {
-                Ok(Some(config)) if config == self.config => {}
-                Ok(_) | Err(_) => return,
+            if !self.refresh_config() {
+                return;
             }
 
             match self.client.get_updates(self.offset) {
                 Ok(updates) => {
+                    if !self.refresh_config() {
+                        return;
+                    }
+
                     for update in updates {
                         self.offset = update.update_id + 1;
                         self.handle_update(update);
@@ -327,6 +340,16 @@ impl BotRunner {
                 Err(_) => thread::sleep(Duration::from_secs(5)),
             }
             self.cleanup_pending();
+        }
+    }
+
+    fn refresh_config(&mut self) -> bool {
+        match BotConfig::load(&self.app) {
+            Ok(Some(config)) if self.config.uses_same_token(&config) => {
+                self.config = config;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -356,8 +379,32 @@ impl BotRunner {
             return;
         }
 
-        if is_command(&text, "status") {
+        if is_command(&text, "menu") {
+            let _ = self
+                .client
+                .send_menu(message.chat.id, main_menu_text(), main_menu_keyboard());
+        } else if is_command(&text, "help") {
+            let _ = self
+                .client
+                .send_message(message.chat.id, command_help_text());
+        } else if is_command(&text, "status") {
             self.send_status(message.chat.id);
+        } else if is_command(&text, "backup") {
+            self.run_backup(message.chat.id);
+        } else if is_command(&text, "logs") {
+            let _ = self.client.send_menu(
+                message.chat.id,
+                "Choose a log target.",
+                logs_menu_keyboard(),
+            );
+        } else if is_command(&text, "pm2") {
+            let _ = self.client.send_menu(
+                message.chat.id,
+                "Choose a PM2 restart target.",
+                pm2_menu_keyboard(),
+            );
+        } else if is_command(&text, "deploy") {
+            self.send_confirmation(message.chat.id, PendingAction::DeployLatestRelease);
         } else {
             let _ = self
                 .client
@@ -490,6 +537,25 @@ impl BotRunner {
     }
 
     fn ask_confirmation(&mut self, chat_id: i64, message_id: i64, action: PendingAction) {
+        let (nonce, label) = self.add_pending_confirmation(action);
+        let _ = self.client.edit_menu(
+            chat_id,
+            message_id,
+            format!("Confirm {label}?"),
+            confirmation_keyboard(&nonce),
+        );
+    }
+
+    fn send_confirmation(&mut self, chat_id: i64, action: PendingAction) {
+        let (nonce, label) = self.add_pending_confirmation(action);
+        let _ = self.client.send_menu(
+            chat_id,
+            format!("Confirm {label}?"),
+            confirmation_keyboard(&nonce),
+        );
+    }
+
+    fn add_pending_confirmation(&mut self, action: PendingAction) -> (String, String) {
         let nonce = create_nonce();
         let label = action.label();
         self.pending.insert(
@@ -499,12 +565,7 @@ impl BotRunner {
                 expires_at: Instant::now() + Duration::from_secs(CONFIRMATION_TTL_SECS),
             },
         );
-        let _ = self.client.edit_menu(
-            chat_id,
-            message_id,
-            format!("Confirm {label}?"),
-            confirmation_keyboard(&nonce),
-        );
+        (nonce, label)
     }
 
     fn run_confirmed_action(&mut self, chat_id: i64, message_id: i64, nonce: &str) {
@@ -687,6 +748,10 @@ fn main_menu_text() -> &'static str {
     "EduClassControl remote admin"
 }
 
+fn command_help_text() -> &'static str {
+    "EduClassControl commands\n/menu - Show control menu\n/status - Show app status\n/backup - Run database backup\n/logs - Choose a log target\n/pm2 - Choose a PM2 restart target\n/deploy - Confirm latest Portal deploy\n/help - Show commands"
+}
+
 fn main_menu_keyboard() -> Value {
     keyboard(vec![
         vec![
@@ -809,6 +874,14 @@ mod tests {
             parse_id_list("123, 456;789").expect("ids"),
             vec![123, 456, 789]
         );
+    }
+
+    #[test]
+    fn recognizes_plain_and_mentioned_commands() {
+        assert!(is_command("/menu", "menu"));
+        assert!(is_command("/status@EduClass_Control_bot", "status"));
+        assert!(is_command("/deploy latest", "deploy"));
+        assert!(!is_command("/deployment", "deploy"));
     }
 
     #[test]
